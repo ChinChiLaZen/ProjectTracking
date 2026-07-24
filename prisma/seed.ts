@@ -180,6 +180,52 @@ async function main() {
     });
   }
 
+  // Session 5 fixture: one column per new type + a representative value on
+  // a dedicated item — §4.3's "column type is done" checklist requires a
+  // seed row per type. Routed through the service layer (small, ordinary
+  // writes — not the 10k-board's bulk-insert exception below).
+  const statusColumnDef = await createColumnDefinition({
+    organizationId: org.id,
+    boardId: board.id,
+    key: "status",
+    name: "Status",
+    settings: {
+      options: [
+        { id: "todo", label: "To Do", color: "#ccc", order: 0 },
+        { id: "doing", label: "In Progress", color: "#fc0", order: 1 },
+        { id: "done", label: "Done", color: "#0c0", order: 2 },
+      ],
+    },
+  });
+  const personColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "person", name: "Assignee" });
+  const dateColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "date", name: "Due date" });
+  const numberColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "number", name: "Estimate" });
+  const checkboxColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "checkbox", name: "Done?" });
+  const longTextColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "long_text", name: "Notes" });
+
+  const demoItem = await createItem({
+    organizationId: org.id,
+    boardId: board.id,
+    groupId: todoGroup.id,
+    name: "Demo item (all column types)",
+    actorId: owner.id,
+  });
+
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: statusColumnDef.id, value: "doing", expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: personColumnDef.id, value: [owner.id, member.id], expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: dateColumnDef.id, value: "2026-08-01", expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: numberColumnDef.id, value: 5, expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: checkboxColumnDef.id, value: false, expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({
+    organizationId: org.id,
+    boardId: board.id,
+    itemId: demoItem.id,
+    columnId: longTextColumnDef.id,
+    value: "Multi-line notes go here.\nSecond line.",
+    expectedVersion: 0,
+    actorId: owner.id,
+  });
+
   const bigBoardStart = performance.now();
   await runWithTenant(org.id, () => seedBigBoard({ organizationId: org.id, workspaceId: workspace.id }));
   const bigBoardMs = Math.round(performance.now() - bigBoardStart);
