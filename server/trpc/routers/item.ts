@@ -1,7 +1,15 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
-import { createItem, deleteItem, listItemsInGroup, moveItem, moveKanbanItem, renameItem } from "../../services/items";
+import {
+  createItem,
+  deleteItem,
+  listItemsInDateRange,
+  listItemsInGroup,
+  moveItem,
+  moveKanbanItem,
+  renameItem,
+} from "../../services/items";
 import { setColumnValue } from "../../services/columnValues";
 import { defaultViewConfig, viewConfigSchema } from "../../../lib/views/viewConfig";
 
@@ -130,6 +138,34 @@ export const itemRouter = router({
         groupId: input.groupId,
         viewConfig: input.viewConfig ?? defaultViewConfig,
         cursor: input.cursor,
+        limit: input.limit,
+      });
+    }),
+
+  // Session 10: Calendar — boardwide, not scoped to one Group (§6 "query by
+  // date range, never load the whole board"). rangeStart/rangeEnd are the
+  // rendered grid's actual bounds (may dip into adjacent months), not the
+  // calendar month itself — see lib/views/calendarGrid.ts.
+  listByDateRange: protectedProcedure
+    .input(
+      z.object({
+        boardId: z.string(),
+        dateColumnId: z.string(),
+        rangeStart: z.iso.datetime(),
+        rangeEnd: z.iso.datetime(),
+        viewConfig: viewConfigSchema.optional(),
+        limit: z.number().int().min(1).max(1000).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // board.read (§5)
+      return listItemsInDateRange({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        dateColumnId: input.dateColumnId,
+        rangeStart: new Date(input.rangeStart),
+        rangeEnd: new Date(input.rangeEnd),
+        viewConfig: input.viewConfig ?? defaultViewConfig,
         limit: input.limit,
       });
     }),

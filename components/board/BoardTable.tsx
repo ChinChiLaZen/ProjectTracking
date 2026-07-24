@@ -27,6 +27,7 @@ import { defaultViewConfig, type ViewConfig } from "@/lib/views/viewConfig";
 import { isKanbanGroupable } from "@/lib/views/kanbanGroupKeyValue";
 import { FilterSortBuilder } from "./FilterSortBuilder";
 import { KanbanBoard } from "./KanbanBoard";
+import { CalendarBoard } from "./CalendarBoard";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/server/trpc/routers/_app";
 
@@ -591,6 +592,7 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
   const { columns } = boardQuery.data;
   const groups = sortByRank(boardQuery.data.groups);
   const kanbanGroupByColumn = columns.find((c) => c.id === draftConfig.groupBy);
+  const calendarDateColumn = columns.find((c) => c.id === draftConfig.dateColumnId);
 
   function handleGroupDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -625,6 +627,7 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
           >
             <option value="table">Table</option>
             <option value="kanban">Kanban</option>
+            <option value="calendar">Calendar</option>
           </select>
         </label>
         {draftConfig.type === "kanban" && (
@@ -643,6 +646,24 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
             </select>
           </label>
         )}
+        {draftConfig.type === "calendar" && (
+          <label style={{ marginLeft: "1rem" }}>
+            Date column:{" "}
+            <select
+              value={draftConfig.dateColumnId ?? ""}
+              onChange={(e) => setDraftConfig((prev) => ({ ...prev, dateColumnId: e.target.value || null }))}
+            >
+              <option value="">— choose a column —</option>
+              {columns
+                .filter((c) => getColumnType(columnTypeRegistry, c.key).shadowField === "valueDate")
+                .map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
       </div>
       {mutationError && <p style={{ color: "crimson" }}>{mutationError}</p>}
       {draftConfig.type === "kanban" ? (
@@ -656,6 +677,12 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
           />
         ) : (
           <p>Choose a column to group by.</p>
+        )
+      ) : draftConfig.type === "calendar" ? (
+        calendarDateColumn ? (
+          <CalendarBoard boardId={boardId} dateColumn={calendarDateColumn} viewConfig={draftConfig} />
+        ) : (
+          <p>Choose a date column.</p>
         )
       ) : (
         <div role="table" style={{ width: "100%" }}>

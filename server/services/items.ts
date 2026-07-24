@@ -308,6 +308,59 @@ export async function listItemsInGroup(params: {
   });
 }
 
+// Calendar (§6/§10.1 Session 10): "query by date range, never load the
+// whole board." Unlike listItemsInGroup, this is boardwide, not scoped to
+// one Group — a calendar day cell needs items from every group whose
+// chosen date column falls on that day, and Table/Kanban's per-Group
+// partition doesn't apply to a date-indexed view. No cursor pagination
+// (a rendered month grid is inherently bounded); `limit` is a flat safety
+// cap, not a page size, so a pathological all-items-one-day case still
+// can't load the whole board.
+export async function listItemsInDateRange(params: {
+  organizationId: string;
+  boardId: string;
+  dateColumnId: string;
+  rangeStart: Date;
+  rangeEnd: Date;
+  viewConfig: ViewConfig;
+  limit?: number;
+}) {
+  const { organizationId, boardId, dateColumnId, rangeStart, rangeEnd, viewConfig } = params;
+  const limit = params.limit ?? 500;
+
+  return runWithTenant(organizationId, async () => {
+    const columns = await prisma.columnDefinition.findMany({ where: { boardId, organizationId } });
+    // Only the *other* filters come from compileViewConfig — the date-range
+    // condition itself is this query's own, always-present clause below.
+    const { itemWhere } = compileViewConfig(viewConfig, columns, columnTypeRegistry);
+
+    // itemWhere.AND may be a single fragment or an array (Prisma's own
+    // union for this field) — normalize before appending this query's own
+    // always-present date-range condition.
+    const otherConditions = itemWhere.AND ? (Array.isArray(itemWhere.AND) ? itemWhere.AND : [itemWhere.AND]) : [];
+    const scopedWhere: Prisma.ItemWhereInput = {
+      boardId,
+      organizationId,
+      AND: [
+        ...otherConditions,
+        { values: { some: { columnId: dateColumnId, organizationId, valueDate: { gte: rangeStart, lte: rangeEnd } } } },
+      ],
+    };
+
+    const items = await prisma.item.findMany({
+      where: scopedWhere,
+      orderBy: [{ rank: "asc" }, { id: "asc" }],
+      take: limit,
+    });
+
+    const values = await prisma.columnValue.findMany({
+      where: { itemId: { in: items.map((i) => i.id) }, organizationId },
+    });
+
+    return { items, values: trimValues(values) };
+  });
+}
+
 // §4.2: "Item... carries a version Int bumped on every write" — a rename is
 // a write to Item, so it gets the same optimistic-concurrency contract as
 // moveItem/setColumnValue, not a last-write-wins shortcut.

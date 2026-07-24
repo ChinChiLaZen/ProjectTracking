@@ -161,6 +161,7 @@ async function main() {
     actorId: owner.id,
   });
 
+  const todoItems: { id: string; name: string }[] = [];
   for (const name of ["Kick off project", "Draft plan", "Review with stakeholders"]) {
     const item = await createItem({
       organizationId: org.id,
@@ -169,6 +170,7 @@ async function main() {
       name,
       actorId: owner.id,
     });
+    todoItems.push(item);
 
     await setColumnValue({
       organizationId: org.id,
@@ -215,6 +217,13 @@ async function main() {
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: statusColumnDef.id, value: "doing", expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: personColumnDef.id, value: [owner.id, member.id], expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: dateColumnDef.id, value: "2026-08-01", expectedVersion: 0, actorId: owner.id });
+
+  // Session 10 fixture: a couple more Due dates on the existing "To Do"
+  // items — previously only demoItem had a date value, leaving the
+  // Calendar view with a single populated day to look at.
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: todoItems[0]!.id, columnId: dateColumnDef.id, value: "2026-08-03", expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: todoItems[1]!.id, columnId: dateColumnDef.id, value: "2026-08-03", expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: todoItems[2]!.id, columnId: dateColumnDef.id, value: "2026-08-10", expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: numberColumnDef.id, value: 5, expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: checkboxColumnDef.id, value: false, expectedVersion: 0, actorId: owner.id });
   await setColumnValue({
@@ -259,6 +268,17 @@ async function main() {
     name: "By status (Kanban)",
     visibility: "SHARED",
     config: { type: "kanban", groupBy: statusColumnDef.id },
+    creatorId: owner.id,
+  });
+
+  // Session 10 fixture: a Calendar-mode view keyed on Due date — proves the
+  // saved-view round trip for viewConfig.type/dateColumnId against real data.
+  await createView({
+    organizationId: org.id,
+    boardId: board.id,
+    name: "By due date (Calendar)",
+    visibility: "SHARED",
+    config: { type: "calendar", dateColumnId: dateColumnDef.id },
     creatorId: owner.id,
   });
 
