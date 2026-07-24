@@ -3,7 +3,7 @@
 Persistent project brief for Claude Code. **Read §0–§4 fully before writing any code.**
 This file is the source of truth for architecture, conventions, and invariants. Update it in the same PR whenever a decision changes — a stale brief is worse than none.
 
-> **START HERE →** Phase 0, Session 1 (skeleton + tenancy) is done, and the "first follow-up before Session 2" from §14 is also done: local Postgres/Redis are up via `docker-compose.yml`, the initial migration is generated and committed, CI runs `prisma migrate deploy`, and the repo has its first commit. Next action is **Session 2** in §10.1 — one vertical slice, one column type (`text`), through the full §4.3 registry interface.
+> **START HERE →** Session 2 (§10.1) is done: Board → Group → Item → ColumnValue with the `text` column type through the full §4.3 registry interface, a minimal Table view with optimistic inline edit, shadow projection, `ActivityLog`, and transactional `OutboxEvent` writes — all gated through `requireBoardAccess`. Registry interface held up under real use; no changes to `lib/columnTypes/types.ts` were needed after implementing it. Next action is **Session 3** in §10.1 — `lib/ordering/` (extend, don't recreate, the `rank.ts` stub from Session 2), `rebalanceRanks` job, dnd-kit wiring for drag-to-reorder.
 > Update this line at the end of every session. It is the first thing to read and the easiest thing to let go stale.
 
 ---
@@ -192,27 +192,32 @@ Notification, Attachment, AutomationRun, OutboxEvent (§7.1), Invitation
 
 ### 4.3 Column type registry — `lib/columnTypes/<type>.ts`
 
-Every column type exports one object implementing a shared interface:
+Every column type exports one object implementing a shared interface. Interface below was stress-tested against `person` (array value), `date` (two-argument operators, timezone), and `formula` (no stored value) before `text` was implemented against it — see `lib/columnTypes/types.ts` for the full annotated contract (five numbered decisions in the file comments). Do not simplify this back down while adding new column types:
 
 ```ts
-export const statusColumn: ColumnType<StatusValue> = {
+export const statusColumn: ColumnType<StatusValue, StatusSettings> = {
   key: "status",
-  valueSchema,                   // Zod — validates ColumnValue.value
-  settingsSchema,                // Zod — validates ColumnDefinition.settings (option sets etc.)
-  defaultValue,
-  toShadow(value, settings),     // { valueText?, valueNumber?, valueDate?, valueRefIds? }
-  filterOperators,               // which operators the UI offers + how they map to SQL
-  sortComparator,                // DB-side sort expression
-  Cell, Editor,                  // React components
-  toDisplayString(value, settings), // used by search, exports, notification text
-  parseFromImport,               // CSV/paste ingestion
+  computed?: boolean,                        // formula/rollup only — setColumnValue rejects writes when true
+  valueSchema,                                // Zod — validates ColumnValue.value
+  settingsSchema,                             // Zod — validates ColumnDefinition.settings (option sets etc.)
+  defaultValue: (settings) => StatusValue,    // a function, not a constant — some defaults depend on settings
+  shadowField: "valueText",                   // which shadow column this type filters/sorts on
+  toShadow: (ctx: DeriveContext) => Shadow,   // ctx carries value/settings/item/sibling values+columns/timeZone —
+                                               // computed types need the siblings; plain types ignore them
+  isEmpty: (value) => boolean,
+  groupKeys: (value, settings) => GroupKey[], // 0..n buckets — e.g. multi-assignee person puts an item in 2 Kanban columns
+  extraOperators?, reconcileValues?,          // escape hatch; option-set migration hook
+  toDisplayString(value, settings),           // used by search, exports, notification text
+  parse(input, settings),                     // CSV/paste ingestion — returns null on unparseable input
+  Cell, Editor,                                // React components — Cell takes `readOnly`, Editor reports via onChange/onCancel
 };
 ```
+No `sortComparator` on the interface by design — sorting is `ORDER BY <shadowField>` in SQL; if a type can't be sorted by its shadow field, the shadow projection is wrong, not this interface. Filter operators are declared per shadow field (shared across every column type that uses it), not per column type — see `lib/columnTypes/operators.ts` (Session 4, not built yet).
 
 Phase 1 types: `text`, `long_text`, `status`, `person`, `date`, `number`, `checkbox`.
 Later: `dropdown`, `timeline`, `link`, `files`, `connect_board`, `formula`, `rollup`, `rating`.
 
-**Definition of "column type is done":** registry file + Zod schemas + shadow projection + filter operators + cell/editor + unit tests + one row in the seed data. Anything less is not done.
+**Definition of "column type is done":** registry file + Zod schemas + shadow projection (`shadowField`/`toShadow`) + `isEmpty`/`groupKeys`/`parse` + cell/editor + unit tests + one row in the seed data. Anything less is not done. (Per-shadow-field filter operator sets live once in `lib/columnTypes/operators.ts`, Session 4 — a column type only needs `extraOperators` if it wants something beyond its shadow field's shared set.)
 
 ---
 
@@ -472,4 +477,8 @@ Append one line per architectural decision, newest last. If a decision reverses 
 - `2026-07-23` — Minimal `Board` + `BoardMembership` models added in Phase 0 (not just Organization/User/Workspace/membership) — `requireBoardAccess` and the §5 role matrix need something board-shaped to resolve against; full Board features (Group/Item/ColumnValue/Views) remain Phase 1+.
 - `2026-07-23` — No `prisma/migrations/` committed yet. This sandbox has no Docker/local Postgres, so schema/seed/tests were verified via `prisma db push` against Prisma's local `prisma dev` server instead — `migrate dev`'s shadow-database step isn't wire-compatible with that ephemeral server (unrelated to the schema; ordinary Docker Postgres doesn't have this limitation). **First follow-up before Session 2:** run `docker compose up -d && pnpm db:migrate` once against real Postgres to generate and commit the initial migration; CI currently uses `prisma db push` for its ephemeral test database and should switch to `prisma migrate deploy` once that migration exists.
 - `2026-07-24` — Closed the Session 1 follow-up: `docker compose up -d` against real Postgres/Redis, then `pnpm db:migrate --name init` generated `prisma/migrations/20260723233151_init` (first committed migration — CI switched from `prisma db push` to `prisma migrate deploy`, matching the TODO that was already written into `ci.yml`). Also fixed a Prisma 7 config gap found while seeding: `package.json`'s legacy `prisma.seed` key is not read by Prisma 7 (`db seed` errored "No seed command configured"); moved it to `prisma.config.ts`'s `migrations.seed` and removed the dead `package.json` key. Repo's first commit (`479a86e`) made at this point — everything from Session 1 had been sitting uncommitted until now.
+- `2026-07-24` — Session 2 shipped: Board→Group→Item→ColumnValue vertical slice with the `text` column type, proving the §4.3 registry interface (`lib/columnTypes/types.ts` needed no changes after implementation — good sign for adding `status`/`person`/etc. in Session 5). New dependency: `fractional-indexing@4.0.0`. Resolved the three things flagged underspecified going in: (1) stood up a minimal `lib/ordering/rank.ts` now (just `firstRank`/`rankAfter`) rather than waiting for Session 3, which extends it rather than creating it fresh; (2) `ActivityLog` shape landed as `{ id, organizationId, boardId, itemId?, actorType, actorId, type, payload, createdAt }`, one row per item-create and per column-value write; (3) `Item.number` is computed transactionally as `MAX(number)+1` scoped to the board, using a `SELECT ... FOR UPDATE` lock on the *Board* row as the serialization point (Postgres won't allow `FOR UPDATE` directly on an aggregate query) — correct but serializes concurrent item-creates per board, acceptable until Session 4's perf work.
+- `2026-07-24` — Two Prisma 7 gotchas hit during Session 2, worth knowing before the next schema change: (1) `prisma migrate dev` in this custom-generator-output setup does **not** reliably regenerate `generated/prisma` as part of the same invocation — run `pnpm exec prisma generate` explicitly right after, or typecheck fails with misleading "property does not exist on PrismaClient" errors. (2) `@@index([field], type: Gin)` on a `String[]` column (used for `ColumnValue.valueRefIds` per §4.2) works out of the box on Prisma 7.9.0 with no preview feature flag needed.
+- `2026-07-24` — Client-side tRPC gotcha: returning a raw Prisma row with a `Json` field (e.g. `ColumnValue.value`) from a query/mutation makes TypeScript choke ("type instantiation is excessively deep") once it flows through `@trpc/react-query`'s `useQuery`/`useMutation` optimistic-update generics — Prisma's `JsonValue` type is recursive and doesn't survive that generic chain. Fix used here: routers map Json-bearing fields to `unknown` before returning (see `server/services/boards.ts`'s `BoardColumnValue`/`BoardColumnDefinition` types and `item.setColumnValue`'s trimmed return in `server/trpc/routers/item.ts`) rather than returning Prisma rows verbatim. Worth remembering for every future column type with Json-shaped values (`connect_board`, `formula`, etc.).
 - `2026-07-23` — Noted for awareness, not acted on: a `CLAUDE.lite.md` also exists in this repo (a simplified single-tenant variant with no Organization layer, no Redis/BullMQ). Session 1 was built against this file (`CLAUDE.md`), per explicit instruction referencing §10.1 (a section that only exists here, not in the lite variant). Flagging in case the two were meant to be reconciled or the lite version was intended as primary.
+- `2026-07-24` — Revision: the 2026-07-24 entry above claiming `lib/columnTypes/types.ts` "needed no changes after implementation" turned out to be premature — the registry contract was substantially redesigned (still Session 2, `text` still the only implemented type) after being stress-tested against `person`/`date`/`formula` shapes it hadn't been checked against yet. Five changes, all now reflected in §4.3: (1) `toShadow` takes a `DeriveContext` (value + settings + item + every sibling column/value on the item + board timeZone) instead of `(value, settings)`, so computed types (`formula`/`rollup`) can read dependencies without a second signature later; (2) filter operators moved from per-column-type `filterOperators` to a per-shadow-field `extraOperators` escape hatch over shared sets (`lib/columnTypes/operators.ts`, still Session 4, not built); (3) added `groupKeys(value, settings) -> GroupKey[]` (0..n buckets, not a single string — multi-assignee `person` needs to land in >1 Kanban column, and empty gets its own explicit bucket); (4) added `reconcileValues?` so a column type can migrate/clear `ColumnValue`s in the same transaction as a settings change (e.g. deleting a status option); (5) added `computed?: boolean` so `setColumnValue` can generically reject writes to formula/rollup columns. Also: `Cell`/`Editor` props changed (`Cell` takes `readOnly` instead of owning an `onStartEdit` callback — the grid now owns the click-to-edit trigger; `Editor`'s `onCommit` renamed `onChange`), `defaultValue` became `(settings) => TValue` instead of a constant, `parseFromImport` renamed `parse` and can return `null`. `Board.timeZone String @default("UTC")` added to the schema (new migration `20260724011431_add_board_timezone`) since `DeriveContext.timeZone` needed a real value. `text` was rewritten against the new contract, including `isEmpty`/`groupKeys`/`parse` even though they're near-trivial for a plain string — the point is proving the interface, not minimizing this file.

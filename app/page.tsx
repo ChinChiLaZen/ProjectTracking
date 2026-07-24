@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
 
@@ -13,7 +14,7 @@ export default function Home() {
     return (
       <main style={{ maxWidth: 480, margin: "4rem auto" }}>
         <p>
-          Not signed in. <a href="/sign-in">Sign in</a>
+          Not signed in. <Link href="/sign-in">Sign in</Link>
         </p>
       </main>
     );

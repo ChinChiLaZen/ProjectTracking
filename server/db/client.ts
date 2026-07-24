@@ -7,8 +7,19 @@ import { getTenantOrganizationId } from "./tenantContext";
 // query against a tenant-owned model runs inside a request (tenant context
 // set) without an organizationId filter/value matching that tenant, so a
 // missing predicate fails loud instead of silently leaking cross-tenant data.
-const TENANT_SCOPED_MODELS = new Set(["Workspace", "Board"]);
-const SOFT_DELETE_MODELS = new Set(["Workspace", "Board"]);
+const TENANT_SCOPED_MODELS = new Set([
+  "Workspace",
+  "Board",
+  "Group",
+  "Item",
+  "ColumnDefinition",
+  "ColumnValue",
+  "ActivityLog",
+  "OutboxEvent",
+]);
+// ColumnValue/ActivityLog/OutboxEvent are append-only or overwrite-in-place
+// (no deletedAt column) — soft delete only applies to Group/Item/ColumnDefinition.
+const SOFT_DELETE_MODELS = new Set(["Workspace", "Board", "Group", "Item", "ColumnDefinition"]);
 const READ_OPS = new Set(["findMany", "findFirst", "count"]);
 const WHERE_OPS = new Set(["findMany", "findFirst", "findUnique", "update", "updateMany", "delete", "deleteMany", "count"]);
 

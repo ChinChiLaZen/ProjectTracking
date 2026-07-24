@@ -18,6 +18,14 @@ enum Role {
   GUEST
 }
 
+// Who performed a write — automations must be able to tell their own
+// past actions apart from a human's to avoid re-triggering themselves (§7).
+enum ActorType {
+  USER
+  AUTOMATION
+  SYSTEM
+}
+
 model Organization {
   id        String   @id @default(cuid(2))
   name      String
@@ -84,16 +92,169 @@ model Board {
   organizationId String
   workspaceId    String
   name           String
+  timeZone       String    @default("UTC")
   createdAt      DateTime  @default(now())
   deletedAt      DateTime?
 
-  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  workspace    Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  memberships  BoardMembership[]
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  memberships       BoardMembership[]
+  groups            Group[]
+  columnDefinitions ColumnDefinition[]
+  items             Item[]
+  activityLogs      ActivityLog[]
+  outboxEvents      OutboxEvent[]
 
   @@index([organizationId])
   @@index([workspaceId])
   @@map("boards")
+}
+
+// Ordered section within a board (§4.1). organizationId/boardId are
+// denormalized for tenant filtering (§4.2) without a full Prisma relation
+// to Organization — referential integrity for deletes flows through Board.
+model Group {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  name           String
+  rank           String
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  items Item[]
+
+  @@index([organizationId])
+  @@index([boardId])
+  @@map("groups")
+}
+
+// One row per board column (§4.3 registry). `key` selects the ColumnType
+// implementation (e.g. "text"); `settings` is validated against that
+// type's settingsSchema (option sets etc.) at write time, not by Postgres.
+model ColumnDefinition {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  key            String
+  name           String
+  settings       Json      @default("{}")
+  rank           String
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  board  Board         @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  values ColumnValue[]
+
+  @@index([organizationId])
+  @@index([boardId])
+  @@map("column_definitions")
+}
+
+model Item {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  groupId        String
+  number         Int
+  name           String
+  rank           String
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  board        Board         @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  group        Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  values       ColumnValue[]
+  activityLogs ActivityLog[]
+  outboxEvents OutboxEvent[]
+
+  @@unique([boardId, number])
+  @@index([organizationId])
+  @@index([boardId])
+  @@index([groupId])
+  @@map("items")
+}
+
+// Item × ColumnDefinition. `value` is canonical (type-specific shape,
+// validated by the column type's valueSchema); the shadow columns below
+// are what filters/sorts actually query against — never `value` directly
+// (§4.2, the most important perf decision in the project).
+model ColumnValue {
+  id             String    @id @default(cuid(2))
+  itemId         String
+  columnId       String
+  organizationId String
+  boardId        String
+  value          Json
+  valueText      String?
+  valueNumber    Decimal?
+  valueDate      DateTime?
+  valueDateEnd   DateTime?
+  valueRefIds    String[]
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  item   Item             @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  column ColumnDefinition @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, columnId])
+  @@index([organizationId])
+  @@index([boardId, columnId, valueText])
+  @@index([boardId, columnId, valueNumber])
+  @@index([boardId, columnId, valueDate])
+  @@index([valueRefIds], type: Gin)
+  @@map("column_values")
+}
+
+// Append-only audit trail (§4.1/§4.2). actorType/actorId let automations
+// recognize their own past writes and avoid re-triggering themselves (§7).
+model ActivityLog {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  itemId         String?
+  actorType      ActorType
+  actorId        String
+  type           String
+  payload        Json
+  createdAt      DateTime  @default(now())
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  item  Item? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([boardId])
+  @@index([itemId])
+  @@map("activity_logs")
+}
+
+// Transactional outbox (§7.1) — written in the same $transaction as the
+// data change it describes, so "commit but never enqueue" can't happen
+// silently. The automation worker (Phase 4) relays unpublished rows to
+// BullMQ; written from Phase 1 even though nothing consumes it yet.
+model OutboxEvent {
+  id                    String    @id @default(cuid(2))
+  organizationId        String
+  boardId               String
+  itemId                String?
+  type                  String
+  payload               Json
+  actorType             ActorType
+  actorId               String
+  depth                 Int       @default(0)
+  causedByAutomationIds String[]
+  createdAt             DateTime  @default(now())
+  publishedAt           DateTime?
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  item  Item? @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([publishedAt, createdAt])
+  @@index([organizationId])
+  @@map("outbox_events")
 }
 
 // Explicit per-board role, overriding the org-level default (§5).
