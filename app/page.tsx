@@ -37,6 +37,55 @@ function CreateBoardForm({ workspaceId }: { workspaceId: string }) {
   );
 }
 
+// Minimal UI (Session 12) — plain inline form + results list, matching
+// CreateBoardForm's pattern. Submits on Enter/click, not per-keystroke —
+// `draft` is the live input value, `submittedQuery` is what actually
+// drives the query (only updated on submit).
+function WorkspaceSearch({ workspaceId }: { workspaceId: string }) {
+  const [draft, setDraft] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
+
+  const results = trpc.search.global.useQuery(
+    { workspaceId, query: submittedQuery },
+    { enabled: submittedQuery.trim().length > 0 },
+  );
+
+  return (
+    <div>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSubmittedQuery(draft);
+        }}
+        style={{ display: "flex", gap: "0.5rem" }}
+      >
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Search this workspace…"
+        />
+        <button type="submit" disabled={draft.trim().length === 0}>
+          Search
+        </button>
+      </form>
+      {results.isLoading && <p>Searching…</p>}
+      {results.error && <p style={{ color: "crimson" }}>{results.error.message}</p>}
+      {results.data && (
+        <ul style={{ margin: "0.5rem 0", paddingLeft: "1.25rem" }}>
+          {results.data.length === 0 && <li>No results.</li>}
+          {results.data.map((r) => (
+            <li key={r.itemId}>
+              <Link href={`/${workspaceId}/boards/${r.boardId}`}>
+                {r.itemName} <span style={{ color: "#888" }}>— {r.boardName} (#{r.itemNumber})</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const { data: session, status } = useSession();
   const workspaces = trpc.workspace.list.useQuery(undefined, { enabled: status === "authenticated" });
@@ -65,6 +114,7 @@ export default function Home() {
           <li key={w.id}>
             <div>{w.name}</div>
             <CreateBoardForm workspaceId={w.id} />
+            <WorkspaceSearch workspaceId={w.id} />
           </li>
         ))}
       </ul>

@@ -6,6 +6,7 @@ import { itemRouter } from "./item";
 import { columnRouter } from "./column";
 import { activityRouter } from "./activity";
 import { viewRouter } from "./view";
+import { searchRouter } from "./search";
 
 export const appRouter = router({
   workspace: workspaceRouter,
@@ -15,6 +16,7 @@ export const appRouter = router({
   column: columnRouter,
   activity: activityRouter,
   view: viewRouter,
+  search: searchRouter,
 });
 
 export type AppRouter = typeof appRouter;
