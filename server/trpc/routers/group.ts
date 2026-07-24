@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
-import { createGroup, moveGroup } from "../../services/groups";
+import { createGroup, deleteGroup, moveGroup, renameGroup } from "../../services/groups";
 
 export const groupRouter = router({
   create: protectedProcedure
@@ -28,6 +28,33 @@ export const groupRouter = router({
         boardId: input.boardId,
         groupId: input.groupId,
         rank: input.rank,
+        actorId: ctx.userId,
+      });
+    }),
+
+  rename: protectedProcedure
+    .input(z.object({ boardId: z.string(), groupId: z.string(), name: z.string().trim().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // same level as group.create
+      return renameGroup({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        groupId: input.groupId,
+        name: input.name,
+        actorId: ctx.userId,
+      });
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ boardId: z.string(), groupId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // ADMIN, not GUEST like create/rename — this cascades (soft-deletes
+      // every item in the group), materially more destructive.
+      await requireBoardAccess(ctx, input.boardId, "ADMIN");
+      return deleteGroup({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        groupId: input.groupId,
         actorId: ctx.userId,
       });
     }),

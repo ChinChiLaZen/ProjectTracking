@@ -20,8 +20,25 @@ const TENANT_SCOPED_MODELS = new Set([
 // ColumnValue/ActivityLog/OutboxEvent are append-only or overwrite-in-place
 // (no deletedAt column) — soft delete only applies to Group/Item/ColumnDefinition.
 const SOFT_DELETE_MODELS = new Set(["Workspace", "Board", "Group", "Item", "ColumnDefinition"]);
-const READ_OPS = new Set(["findMany", "findFirst", "count"]);
-const WHERE_OPS = new Set(["findMany", "findFirst", "findUnique", "update", "updateMany", "delete", "deleteMany", "count"]);
+// Session 6: findFirstOrThrow/findUniqueOrThrow added to both sets — they'd
+// otherwise bypass both the soft-delete filter and the tenant-scoping
+// assertion. Not currently reachable through the tRPC API (every procedure
+// gates through requireBoardAccess's filtered findFirst first), but any
+// future caller that hits the service layer directly (e.g. Phase 4
+// automations) shouldn't get weaker defense-in-depth than the rest.
+const READ_OPS = new Set(["findMany", "findFirst", "findFirstOrThrow", "findUniqueOrThrow", "count"]);
+const WHERE_OPS = new Set([
+  "findMany",
+  "findFirst",
+  "findFirstOrThrow",
+  "findUnique",
+  "findUniqueOrThrow",
+  "update",
+  "updateMany",
+  "delete",
+  "deleteMany",
+  "count",
+]);
 
 function assertTenantScoped(model: string, operation: string, args: Record<string, unknown>, expectedOrgId: string) {
   if (operation === "create") {

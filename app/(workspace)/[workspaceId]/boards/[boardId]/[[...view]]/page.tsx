@@ -1,4 +1,5 @@
 import { BoardTable } from "@/components/board/BoardTable";
+import { ActivityFeed } from "@/components/board/ActivityFeed";
 
 // [[...view]] reserves the route shape for Kanban/Calendar/etc. (§2, §6) —
 // Session 2 only implements Table, so any view segment is currently ignored.
@@ -12,6 +13,7 @@ export default async function BoardPage({
   return (
     <main style={{ maxWidth: 1000, margin: "2rem auto", padding: "0 1rem" }}>
       <BoardTable boardId={boardId} />
+      <ActivityFeed boardId={boardId} />
     </main>
   );
 }

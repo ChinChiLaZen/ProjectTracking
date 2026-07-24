@@ -218,3 +218,95 @@ export async function listItemsInGroup(params: {
     return { items, values: trimValues(values), nextCursor: hasMore ? page[page.length - 1]!.itemId : null };
   });
 }
+
+// §4.2: "Item... carries a version Int bumped on every write" — a rename is
+// a write to Item, so it gets the same optimistic-concurrency contract as
+// moveItem/setColumnValue, not a last-write-wins shortcut.
+export async function renameItem(params: {
+  organizationId: string;
+  boardId: string;
+  itemId: string;
+  name: string;
+  expectedVersion: number;
+  actorId: string;
+}) {
+  const { organizationId, boardId, itemId, name, expectedVersion, actorId } = params;
+
+  return runWithTenant(organizationId, () =>
+    prisma.$transaction(async (tx) => {
+      const item = await tx.item.findFirst({ where: { id: itemId, boardId, organizationId } });
+      if (!item) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      if (item.version !== expectedVersion) {
+        throw new TRPCError({ code: "CONFLICT" });
+      }
+
+      const updated = await tx.item.update({
+        where: { id: itemId, organizationId },
+        data: { name, version: { increment: 1 } },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          organizationId,
+          boardId,
+          itemId,
+          actorType: "USER",
+          actorId,
+          type: "item.renamed",
+          payload: { from: item.name, to: name },
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          organizationId,
+          boardId,
+          itemId,
+          type: "item.renamed",
+          payload: { from: item.name, to: name },
+          actorType: "USER",
+          actorId,
+          depth: 0,
+          causedByAutomationIds: [],
+        },
+      });
+
+      return updated;
+    }),
+  );
+}
+
+export async function deleteItem(params: { organizationId: string; boardId: string; itemId: string; actorId: string }) {
+  const { organizationId, boardId, itemId, actorId } = params;
+
+  return runWithTenant(organizationId, () =>
+    prisma.$transaction(async (tx) => {
+      const item = await tx.item.findFirst({ where: { id: itemId, boardId, organizationId } });
+      if (!item) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      const updated = await tx.item.update({ where: { id: itemId, organizationId }, data: { deletedAt: new Date() } });
+
+      await tx.activityLog.create({
+        data: { organizationId, boardId, itemId, actorType: "USER", actorId, type: "item.deleted", payload: {} },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          organizationId,
+          boardId,
+          itemId,
+          type: "item.deleted",
+          payload: {},
+          actorType: "USER",
+          actorId,
+          depth: 0,
+          causedByAutomationIds: [],
+        },
+      });
+
+      return updated;
+    }),
+  );
+}

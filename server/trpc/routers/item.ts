@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
-import { createItem, listItemsInGroup, moveItem } from "../../services/items";
+import { createItem, deleteItem, listItemsInGroup, moveItem, renameItem } from "../../services/items";
 import { setColumnValue } from "../../services/columnValues";
 import { defaultViewConfig, viewConfigSchema } from "../../../lib/views/viewConfig";
 
@@ -94,6 +94,39 @@ export const itemRouter = router({
         viewConfig: input.viewConfig ?? defaultViewConfig,
         cursor: input.cursor,
         limit: input.limit,
+      });
+    }),
+
+  rename: protectedProcedure
+    .input(
+      z.object({
+        boardId: z.string(),
+        itemId: z.string(),
+        name: z.string().trim().min(1),
+        expectedVersion: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // item.edit (§5)
+      return renameItem({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        itemId: input.itemId,
+        name: input.name,
+        expectedVersion: input.expectedVersion,
+        actorId: ctx.userId,
+      });
+    }),
+
+  delete: protectedProcedure
+    .input(z.object({ boardId: z.string(), itemId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // item.edit (§5)
+      return deleteItem({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        itemId: input.itemId,
+        actorId: ctx.userId,
       });
     }),
 });

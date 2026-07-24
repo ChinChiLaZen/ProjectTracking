@@ -106,3 +106,99 @@ export async function moveGroup(params: {
     }),
   );
 }
+
+export async function renameGroup(params: {
+  organizationId: string;
+  boardId: string;
+  groupId: string;
+  name: string;
+  actorId: string;
+}) {
+  const { organizationId, boardId, groupId, name, actorId } = params;
+
+  return runWithTenant(organizationId, () =>
+    prisma.$transaction(async (tx) => {
+      const group = await tx.group.findFirst({ where: { id: groupId, boardId, organizationId } });
+      if (!group) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      const updated = await tx.group.update({ where: { id: groupId, organizationId }, data: { name } });
+
+      await tx.activityLog.create({
+        data: {
+          organizationId,
+          boardId,
+          actorType: "USER",
+          actorId,
+          type: "group.renamed",
+          payload: { groupId, from: group.name, to: name },
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          organizationId,
+          boardId,
+          type: "group.renamed",
+          payload: { groupId, from: group.name, to: name },
+          actorType: "USER",
+          actorId,
+          depth: 0,
+          causedByAutomationIds: [],
+        },
+      });
+
+      return updated;
+    }),
+  );
+}
+
+// More destructive than create/rename (cascades to items), so gated at
+// ADMIN by the router rather than GUEST like group.create/rename —
+// deliberately asymmetric, see the Session 6 plan notes.
+export async function deleteGroup(params: { organizationId: string; boardId: string; groupId: string; actorId: string }) {
+  const { organizationId, boardId, groupId, actorId } = params;
+
+  return runWithTenant(organizationId, () =>
+    prisma.$transaction(async (tx) => {
+      const group = await tx.group.findFirst({ where: { id: groupId, boardId, organizationId } });
+      if (!group) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      const now = new Date();
+      const updated = await tx.group.update({ where: { id: groupId, organizationId }, data: { deletedAt: now } });
+
+      // §4.2: "Deleting a Group soft-deletes its Items."
+      const { count } = await tx.item.updateMany({
+        where: { groupId, organizationId, deletedAt: null },
+        data: { deletedAt: now },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          organizationId,
+          boardId,
+          actorType: "USER",
+          actorId,
+          type: "group.deleted",
+          payload: { groupId, itemsDeleted: count },
+        },
+      });
+      await tx.outboxEvent.create({
+        data: {
+          organizationId,
+          boardId,
+          type: "group.deleted",
+          payload: { groupId, itemsDeleted: count },
+          actorType: "USER",
+          actorId,
+          depth: 0,
+          causedByAutomationIds: [],
+        },
+      });
+
+      return updated;
+    }),
+  );
+}

@@ -4,6 +4,7 @@ import { boardRouter } from "./board";
 import { groupRouter } from "./group";
 import { itemRouter } from "./item";
 import { columnRouter } from "./column";
+import { activityRouter } from "./activity";
 
 export const appRouter = router({
   workspace: workspaceRouter,
@@ -11,6 +12,7 @@ export const appRouter = router({
   group: groupRouter,
   item: itemRouter,
   column: columnRouter,
+  activity: activityRouter,
 });
 
 export type AppRouter = typeof appRouter;

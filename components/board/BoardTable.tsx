@@ -69,6 +69,7 @@ function GroupHeaderRow({ group, columnCount }: { group: BoardGroup; columnCount
     <div
       ref={setNodeRef}
       role="row"
+      data-testid={`group-row-${group.id}`}
       style={{
         ...rowStyle,
         gridTemplateColumns: gridTemplateColumns(columnCount),
@@ -97,6 +98,8 @@ function ItemRow({
   onCommitValue,
   onCancelEdit,
   style,
+  dataIndex,
+  measureRef,
 }: {
   item: BoardItem;
   columns: BoardColumn[];
@@ -106,6 +109,10 @@ function ItemRow({
   onCommitValue: (item: BoardItem, column: BoardColumn, existing: BoardColumnValue | undefined, nextValue: unknown) => void;
   onCancelEdit: () => void;
   style?: CSSProperties;
+  dataIndex: number;
+  // TanStack Virtual's dynamic-measurement callback ref — see the note
+  // where it's passed in below for why this is required, not optional.
+  measureRef: (node: Element | null) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.id,
@@ -114,8 +121,13 @@ function ItemRow({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node);
+        measureRef(node);
+      }}
+      data-index={dataIndex}
       role="row"
+      data-testid={`item-row-${item.id}`}
       style={{
         ...rowStyle,
         ...style,
@@ -125,11 +137,18 @@ function ItemRow({
         opacity: isDragging ? 0.5 : 1,
       }}
     >
-      <div {...attributes} {...listeners} role="cell" style={dragHandleStyle} aria-label={`Reorder item ${item.name}`}>
+      <div
+        {...attributes}
+        {...listeners}
+        role="cell"
+        data-testid={`drag-handle-${item.id}`}
+        style={dragHandleStyle}
+        aria-label={`Reorder item ${item.name}`}
+      >
         ⠿
       </div>
-      <div role="cell">{item.number}</div>
-      <div role="cell">{item.name}</div>
+      <div role="cell" data-testid={`item-number-${item.id}`}>{item.number}</div>
+      <div role="cell" data-testid={`item-name-${item.id}`}>{item.name}</div>
       {columns.map((column) => {
         const columnType = getColumnType(columnTypeRegistry, column.key);
         const existing = valueFor(item.id, column.id);
@@ -142,6 +161,7 @@ function ItemRow({
           <div
             key={column.id}
             role="cell"
+            data-testid={`cell-${item.id}-${column.id}`}
             onClick={() => {
               if (!isReadOnly && !isEditing) onStartEdit(key);
             }}
@@ -249,6 +269,15 @@ function GroupItemList({
     onSettled: () => utils.item.list.invalidate(queryInput),
   });
 
+  const [newItemName, setNewItemName] = useState("");
+  const createItem = trpc.item.create.useMutation({
+    onSuccess: () => {
+      setNewItemName("");
+      utils.item.list.invalidate(queryInput);
+    },
+    onError: (err) => setMutationError(err.message),
+  });
+
   const moveItem = trpc.item.move.useMutation({
     onMutate: async (input) => {
       setMutationError(null);
@@ -295,50 +324,80 @@ function GroupItemList({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleItemDragEnd}>
-      <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
-        <div ref={scrollRef} role="rowgroup" style={{ maxHeight: GROUP_MAX_HEIGHT, overflowY: "auto", position: "relative" }}>
-          <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-            {virtualizer.getVirtualItems().map((virtualRow) => {
-              const item = items[virtualRow.index];
-              if (!item) return null;
-              return (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  columns={columns}
-                  valueFor={valueFor}
-                  editingCell={editingCell}
-                  onStartEdit={setEditingCell}
-                  onCancelEdit={() => setEditingCell(null)}
-                  onCommitValue={(targetItem, column, existing, nextValue) => {
-                    setEditingCell(null);
-                    setColumnValue.mutate({
-                      boardId,
-                      itemId: targetItem.id,
-                      columnId: column.id,
-                      value: nextValue,
-                      expectedVersion: existing?.version ?? 0,
-                    });
-                  }}
-                  style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${virtualRow.start}px)` }}
-                />
-              );
-            })}
+    <>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleItemDragEnd}>
+        <SortableContext items={items.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+          <div ref={scrollRef} role="rowgroup" style={{ maxHeight: GROUP_MAX_HEIGHT, overflowY: "auto", position: "relative" }}>
+            <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const item = items[virtualRow.index];
+                if (!item) return null;
+                return (
+                  <ItemRow
+                    key={item.id}
+                    item={item}
+                    columns={columns}
+                    valueFor={valueFor}
+                    editingCell={editingCell}
+                    onStartEdit={setEditingCell}
+                    onCancelEdit={() => setEditingCell(null)}
+                    onCommitValue={(targetItem, column, existing, nextValue) => {
+                      setEditingCell(null);
+                      setColumnValue.mutate({
+                        boardId,
+                        itemId: targetItem.id,
+                        columnId: column.id,
+                        value: nextValue,
+                        expectedVersion: existing?.version ?? 0,
+                      });
+                    }}
+                    style={{ position: "absolute", top: virtualRow.start, left: 0, right: 0 }}
+                    dataIndex={virtualRow.index}
+                    // Rows aren't a fixed height (form inputs, wrapped
+                    // text) — estimateSize is only a first guess. Without
+                    // dynamic measurement the virtualizer keeps using that
+                    // guess for every row's offset, so taller-than-estimate
+                    // rows overlap the next one (found via a real Playwright
+                    // click failing on an intercepted pointer-events target,
+                    // not by inspection).
+                    measureRef={virtualizer.measureElement}
+                  />
+                );
+              })}
+            </div>
           </div>
-        </div>
-      </SortableContext>
-      {itemsQuery.hasNextPage && (
-        <button
-          type="button"
-          onClick={() => itemsQuery.fetchNextPage()}
-          disabled={itemsQuery.isFetchingNextPage}
-          style={{ margin: "0.25rem 0 0.75rem 2rem" }}
-        >
-          {itemsQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+        </SortableContext>
+        {itemsQuery.hasNextPage && (
+          <button
+            type="button"
+            onClick={() => itemsQuery.fetchNextPage()}
+            disabled={itemsQuery.isFetchingNextPage}
+            style={{ margin: "0.25rem 0 0.75rem 2rem" }}
+          >
+            {itemsQuery.isFetchingNextPage ? "Loading…" : "Load more"}
+          </button>
+        )}
+      </DndContext>
+      <form
+        aria-label={`Add item to ${group.name}`}
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (newItemName.trim().length === 0) return;
+          createItem.mutate({ boardId, groupId: group.id, name: newItemName.trim() });
+        }}
+        style={{ margin: "0.25rem 0 0.75rem 2rem", display: "flex", gap: "0.5rem" }}
+      >
+        <input
+          value={newItemName}
+          onChange={(e) => setNewItemName(e.target.value)}
+          placeholder="+ Add item"
+          disabled={createItem.isPending}
+        />
+        <button type="submit" disabled={createItem.isPending || newItemName.trim().length === 0}>
+          Add
         </button>
-      )}
-    </DndContext>
+      </form>
+    </>
   );
 }
 
