@@ -28,6 +28,7 @@ import { isKanbanGroupable } from "@/lib/views/kanbanGroupKeyValue";
 import { FilterSortBuilder } from "./FilterSortBuilder";
 import { KanbanBoard } from "./KanbanBoard";
 import { CalendarBoard } from "./CalendarBoard";
+import { UpdatesPanel } from "./UpdatesPanel";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/server/trpc/routers/_app";
 
@@ -60,7 +61,7 @@ export function sortByRank<T extends { rank: string }>(rows: T[]): T[] {
 }
 
 function gridTemplateColumns(columnCount: number) {
-  return `2rem 4rem 10rem repeat(${columnCount}, minmax(8rem, 1fr))`;
+  return `2rem 2.5rem 4rem 10rem repeat(${columnCount}, minmax(8rem, 1fr))`;
 }
 
 const dragHandleStyle: CSSProperties = { cursor: "grab", textAlign: "center", touchAction: "none" };
@@ -90,6 +91,7 @@ function GroupHeaderRow({ group, columnCount }: { group: BoardGroup; columnCount
       <div {...attributes} {...listeners} role="cell" style={dragHandleStyle} aria-label={`Reorder group ${group.name}`}>
         ⠿
       </div>
+      <div role="cell" />
       <div role="cell" style={{ gridColumn: `span ${columnCount + 2}`, fontWeight: 600 }}>
         {group.name}
       </div>
@@ -105,6 +107,7 @@ function ItemRow({
   onStartEdit,
   onCommitValue,
   onCancelEdit,
+  onOpenUpdates,
   style,
   dataIndex,
   measureRef,
@@ -116,6 +119,7 @@ function ItemRow({
   onStartEdit: (key: string) => void;
   onCommitValue: (item: BoardItem, column: BoardColumn, existing: BoardColumnValue | undefined, nextValue: unknown) => void;
   onCancelEdit: () => void;
+  onOpenUpdates: (itemId: string) => void;
   style?: CSSProperties;
   dataIndex: number;
   // TanStack Virtual's dynamic-measurement callback ref — see the note
@@ -154,6 +158,17 @@ function ItemRow({
         aria-label={`Reorder item ${item.name}`}
       >
         ⠿
+      </div>
+      <div role="cell">
+        <button
+          type="button"
+          data-testid={`open-updates-${item.id}`}
+          aria-label={`Comments on ${item.name}`}
+          onClick={() => onOpenUpdates(item.id)}
+          style={{ cursor: "pointer" }}
+        >
+          💬
+        </button>
       </div>
       <div role="cell" data-testid={`item-number-${item.id}`}>{item.number}</div>
       <div role="cell" data-testid={`item-name-${item.id}`}>{item.name}</div>
@@ -216,6 +231,7 @@ function GroupItemList({
   const itemsQuery = trpc.item.list.useInfiniteQuery(queryInput, {
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -351,6 +367,7 @@ function GroupItemList({
                     editingCell={editingCell}
                     onStartEdit={setEditingCell}
                     onCancelEdit={() => setEditingCell(null)}
+                    onOpenUpdates={setOpenItemId}
                     onCommitValue={(targetItem, column, existing, nextValue) => {
                       setEditingCell(null);
                       setColumnValue.mutate({
@@ -407,6 +424,14 @@ function GroupItemList({
           Add
         </button>
       </form>
+      {openItemId && (
+        <UpdatesPanel
+          boardId={boardId}
+          itemId={openItemId}
+          itemName={items.find((i) => i.id === openItemId)?.name ?? ""}
+          onClose={() => setOpenItemId(null)}
+        />
+      )}
     </>
   );
 }
@@ -687,6 +712,7 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
       ) : (
         <div role="table" style={{ width: "100%" }}>
           <div role="row" style={{ ...rowStyle, gridTemplateColumns: gridTemplateColumns(columns.length) }}>
+            <div role="columnheader" style={headerCellStyle} />
             <div role="columnheader" style={headerCellStyle} />
             <div role="columnheader" style={headerCellStyle}>#</div>
             <div role="columnheader" style={headerCellStyle}>Name</div>

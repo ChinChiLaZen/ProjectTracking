@@ -50,6 +50,7 @@ model User {
   sessions         Session[]
   memberships      Membership[]
   boardMemberships BoardMembership[]
+  updates          Update[]
 
   @@map("users")
 }
@@ -105,6 +106,7 @@ model Board {
   activityLogs      ActivityLog[]
   outboxEvents      OutboxEvent[]
   views             View[]
+  updates           Update[]
 
   @@index([organizationId])
   @@index([workspaceId])
@@ -170,6 +172,7 @@ model Item {
   values       ColumnValue[]
   activityLogs ActivityLog[]
   outboxEvents OutboxEvent[]
+  updates      Update[]
 
   @@unique([boardId, number])
   @@index([organizationId])
@@ -286,6 +289,35 @@ model View {
   @@index([organizationId])
   @@index([boardId])
   @@map("views")
+}
+
+// Comment thread on an Item (§4.1). Session 13: plain text, not the "rich
+// text" §12 describes — no rich-text editor or HTML-sanitization library
+// exists in this codebase yet, and plain text rendered without
+// dangerouslySetInnerHTML gets React's default escaping for free. Real
+// rich text (and the sanitization §12 actually means) is deferred until
+// @mentions need inline chip rendering. No version field — §4.2's
+// optimistic-concurrency mandate only names Item/ColumnValue; Update
+// follows the same last-write-wins precedent as Group/Board/View. No
+// edit capability this session — create/list/delete is enough to prove
+// the mechanism, same bar Session 7 used for View.
+model Update {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  itemId         String
+  authorId       String
+  body           String    @db.Text
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  board  Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  item   Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([itemId])
+  @@map("updates")
 }
 
 // Explicit per-board role, overriding the org-level default (§5).

@@ -8,6 +8,7 @@ import { createGroup } from "../server/services/groups";
 import { createItem } from "../server/services/items";
 import { setColumnValue } from "../server/services/columnValues";
 import { createView } from "../server/services/views";
+import { createUpdate } from "../server/services/updates";
 import { textColumn } from "../lib/columnTypes/text";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -252,6 +253,11 @@ async function main() {
     expectedVersion: 0,
     actorId: owner.id,
   });
+
+  // Session 13 fixture: a couple of comments on the demo item — proves the
+  // create+list mechanism against real seeded data.
+  await createUpdate({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, authorId: owner.id, body: "Kicking off the review — please add your notes here." });
+  await createUpdate({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, authorId: member.id, body: "Looks good so far, just double-checking the timeline." });
 
   // Session 7 fixture: one shared saved view (default config) on the
   // "Getting Started" board — §9's "every new feature adds its fixture

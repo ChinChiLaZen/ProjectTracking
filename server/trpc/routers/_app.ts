@@ -7,6 +7,7 @@ import { columnRouter } from "./column";
 import { activityRouter } from "./activity";
 import { viewRouter } from "./view";
 import { searchRouter } from "./search";
+import { updateRouter } from "./update";
 
 export const appRouter = router({
   workspace: workspaceRouter,
@@ -17,6 +18,7 @@ export const appRouter = router({
   activity: activityRouter,
   view: viewRouter,
   search: searchRouter,
+  update: updateRouter,
 });
 
 export type AppRouter = typeof appRouter;

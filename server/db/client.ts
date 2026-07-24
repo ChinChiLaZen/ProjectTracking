@@ -17,10 +17,11 @@ const TENANT_SCOPED_MODELS = new Set([
   "ActivityLog",
   "OutboxEvent",
   "View",
+  "Update",
 ]);
 // ColumnValue/ActivityLog/OutboxEvent are append-only or overwrite-in-place
-// (no deletedAt column) — soft delete only applies to Group/Item/ColumnDefinition/View.
-const SOFT_DELETE_MODELS = new Set(["Workspace", "Board", "Group", "Item", "ColumnDefinition", "View"]);
+// (no deletedAt column) — soft delete only applies to Group/Item/ColumnDefinition/View/Update.
+const SOFT_DELETE_MODELS = new Set(["Workspace", "Board", "Group", "Item", "ColumnDefinition", "View", "Update"]);
 // Session 6: findFirstOrThrow/findUniqueOrThrow added to both sets — they'd
 // otherwise bypass both the soft-delete filter and the tenant-scoping
 // assertion. Not currently reachable through the tRPC API (every procedure
