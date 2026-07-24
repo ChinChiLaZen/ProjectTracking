@@ -7,6 +7,7 @@ import { createColumnDefinition } from "../server/services/columnDefinitions";
 import { createGroup } from "../server/services/groups";
 import { createItem } from "../server/services/items";
 import { setColumnValue } from "../server/services/columnValues";
+import { createView } from "../server/services/views";
 import { textColumn } from "../lib/columnTypes/text";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -224,6 +225,18 @@ async function main() {
     value: "Multi-line notes go here.\nSecond line.",
     expectedVersion: 0,
     actorId: owner.id,
+  });
+
+  // Session 7 fixture: one shared saved view (default config) on the
+  // "Getting Started" board — §9's "every new feature adds its fixture
+  // here", and proves the shareable-URL path against real seeded data.
+  await createView({
+    organizationId: org.id,
+    boardId: board.id,
+    name: "All items",
+    visibility: "SHARED",
+    config: {},
+    creatorId: owner.id,
   });
 
   const bigBoardStart = performance.now();

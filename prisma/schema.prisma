@@ -104,6 +104,7 @@ model Board {
   items             Item[]
   activityLogs      ActivityLog[]
   outboxEvents      OutboxEvent[]
+  views             View[]
 
   @@index([organizationId])
   @@index([workspaceId])
@@ -255,6 +256,36 @@ model OutboxEvent {
   @@index([publishedAt, createdAt])
   @@index([organizationId])
   @@map("outbox_events")
+}
+
+enum ViewVisibility {
+  SHARED
+  PERSONAL
+}
+
+// Saved config: type, filters, sort, grouping (§4.1) — `config` is
+// validated against lib/views/viewConfig.ts's viewConfigSchema in the
+// service layer, same pattern as ColumnDefinition.settings. No `rank`:
+// §4.2's fractional-rank list doesn't include View, ordering by createdAt
+// is enough. Creating a SHARED view needs board.editStructure (ADMIN);
+// a PERSONAL view needs only view.createPersonal (GUEST) — both capability
+// names already existed in lib/permissions/matrix.ts before this model did.
+model View {
+  id             String         @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  name           String
+  visibility     ViewVisibility
+  creatorId      String
+  config         Json
+  createdAt      DateTime       @default(now())
+  deletedAt      DateTime?
+
+  board Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([boardId])
+  @@map("views")
 }
 
 // Explicit per-board role, overriding the org-level default (§5).

@@ -23,6 +23,7 @@ import { trpc } from "@/lib/trpc/client";
 import { getColumnType } from "@/lib/columnTypes/types";
 import { columnTypeRegistry } from "@/lib/columnTypes/registry";
 import { rankBetween } from "@/lib/ordering/rank";
+import { defaultViewConfig, type ViewConfig } from "@/lib/views/viewConfig";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/server/trpc/routers/_app";
 
@@ -190,6 +191,7 @@ function GroupItemList({
   boardId,
   group,
   columns,
+  viewConfig,
   editingCell,
   setEditingCell,
   setMutationError,
@@ -197,12 +199,13 @@ function GroupItemList({
   boardId: string;
   group: BoardGroup;
   columns: BoardColumn[];
+  viewConfig: ViewConfig;
   editingCell: string | null;
   setEditingCell: (key: string | null) => void;
   setMutationError: (message: string | null) => void;
 }) {
   const utils = trpc.useUtils();
-  const queryInput = { boardId, groupId: group.id };
+  const queryInput = { boardId, groupId: group.id, viewConfig };
   const itemsQuery = trpc.item.list.useInfiniteQuery(queryInput, {
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
@@ -401,14 +404,98 @@ function GroupItemList({
   );
 }
 
+// One saved view's config, or the default when no viewId is in the URL
+// (§10.1 Session 7: "the client only ever sends the default" until a
+// filter/sort-builder UI exists — this hook just supplies whichever
+// viewConfig is currently active).
+function useActiveViewConfig(boardId: string, viewId: string | undefined) {
+  const viewQuery = trpc.view.get.useQuery(
+    { boardId, viewId: viewId ?? "" },
+    { enabled: Boolean(viewId) },
+  );
+  if (viewId && viewQuery.data) {
+    // `config` is validated server-side at save time (viewConfigSchema in
+    // server/services/views.ts) — trusted here, not re-parsed on every read.
+    return viewQuery.data.config as ViewConfig;
+  }
+  return defaultViewConfig;
+}
+
+// "Views" panel: lists saved views as links to their shareable URL, plus an
+// inline "save current view as…" form. Session 7 only ever saves the
+// default viewConfig (no filter/sort-builder UI yet) — this still proves
+// persistence and URL-sharing end-to-end, per the approved plan.
+function ViewsPanel({ workspaceId, boardId, viewId }: { workspaceId: string; boardId: string; viewId?: string }) {
+  const utils = trpc.useUtils();
+  const viewsQuery = trpc.view.list.useQuery({ boardId });
+  const [name, setName] = useState("");
+  const [visibility, setVisibility] = useState<"SHARED" | "PERSONAL">("SHARED");
+  const [error, setError] = useState<string | null>(null);
+
+  const createView = trpc.view.create.useMutation({
+    onSuccess: () => {
+      setName("");
+      utils.view.list.invalidate({ boardId });
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  return (
+    <div style={{ margin: "0.5rem 0 1rem", padding: "0.5rem", border: "1px solid #ddd" }}>
+      <strong>Views</strong>
+      <ul style={{ margin: "0.5rem 0", paddingLeft: "1.25rem" }}>
+        <li>
+          <a href={`/${workspaceId}/boards/${boardId}`} aria-current={!viewId ? "page" : undefined}>
+            Default
+          </a>
+        </li>
+        {(viewsQuery.data ?? []).map((view) => (
+          <li key={view.id}>
+            <a href={`/${workspaceId}/boards/${boardId}/${view.id}`} aria-current={viewId === view.id ? "page" : undefined}>
+              {view.name}
+            </a>{" "}
+            <span style={{ color: "#888" }}>({view.visibility.toLowerCase()})</span>
+          </li>
+        ))}
+      </ul>
+      {error && <p style={{ color: "crimson" }}>{error}</p>}
+      <form
+        aria-label="Save current view as"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setError(null);
+          if (name.trim().length === 0) return;
+          createView.mutate({ boardId, name: name.trim(), visibility });
+        }}
+        style={{ display: "flex", gap: "0.5rem" }}
+      >
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Save current view as…"
+          disabled={createView.isPending}
+        />
+        <select value={visibility} onChange={(e) => setVisibility(e.target.value as "SHARED" | "PERSONAL")}>
+          <option value="SHARED">Shared</option>
+          <option value="PERSONAL">Personal</option>
+        </select>
+        <button type="submit" disabled={createView.isPending || name.trim().length === 0}>
+          Save
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // Board shell (Session 2/3) + cursor pagination and virtualization per
-// group (Session 4). board.get is now shell-only (board/groups/columns);
-// items are paginated per group via item.list. Every column cell is still
-// dispatched through the registry's Cell/Editor — no per-type branching
-// here (§1 rule 6).
-export function BoardTable({ boardId }: { boardId: string }) {
+// group (Session 4) + saved views (Session 7). board.get is now shell-only
+// (board/groups/columns); items are paginated per group via item.list.
+// Every column cell is still dispatched through the registry's Cell/Editor —
+// no per-type branching here (§1 rule 6).
+export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; workspaceId: string; viewId?: string }) {
   const utils = trpc.useUtils();
   const boardQuery = trpc.board.get.useQuery({ boardId });
+  const viewConfig = useActiveViewConfig(boardId, viewId);
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
@@ -459,35 +546,39 @@ export function BoardTable({ boardId }: { boardId: string }) {
   }
 
   return (
-    <div role="table" style={{ width: "100%" }}>
+    <div style={{ width: "100%" }}>
+      <ViewsPanel workspaceId={workspaceId} boardId={boardId} viewId={viewId} />
       {mutationError && <p style={{ color: "crimson" }}>{mutationError}</p>}
-      <div role="row" style={{ ...rowStyle, gridTemplateColumns: gridTemplateColumns(columns.length) }}>
-        <div role="columnheader" style={headerCellStyle} />
-        <div role="columnheader" style={headerCellStyle}>#</div>
-        <div role="columnheader" style={headerCellStyle}>Name</div>
-        {columns.map((column) => (
-          <div key={column.id} role="columnheader" style={headerCellStyle}>
-            {column.name}
-          </div>
-        ))}
-      </div>
-      <DndContext sensors={groupSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
-        <SortableContext items={groups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
-          {groups.map((group) => (
-            <Fragment key={group.id}>
-              <GroupHeaderRow group={group} columnCount={columns.length} />
-              <GroupItemList
-                boardId={boardId}
-                group={group}
-                columns={columns}
-                editingCell={editingCell}
-                setEditingCell={setEditingCell}
-                setMutationError={setMutationError}
-              />
-            </Fragment>
+      <div role="table" style={{ width: "100%" }}>
+        <div role="row" style={{ ...rowStyle, gridTemplateColumns: gridTemplateColumns(columns.length) }}>
+          <div role="columnheader" style={headerCellStyle} />
+          <div role="columnheader" style={headerCellStyle}>#</div>
+          <div role="columnheader" style={headerCellStyle}>Name</div>
+          {columns.map((column) => (
+            <div key={column.id} role="columnheader" style={headerCellStyle}>
+              {column.name}
+            </div>
           ))}
-        </SortableContext>
-      </DndContext>
+        </div>
+        <DndContext sensors={groupSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+          <SortableContext items={groups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+            {groups.map((group) => (
+              <Fragment key={group.id}>
+                <GroupHeaderRow group={group} columnCount={columns.length} />
+                <GroupItemList
+                  boardId={boardId}
+                  group={group}
+                  columns={columns}
+                  viewConfig={viewConfig}
+                  editingCell={editingCell}
+                  setEditingCell={setEditingCell}
+                  setMutationError={setMutationError}
+                />
+              </Fragment>
+            ))}
+          </SortableContext>
+        </DndContext>
+      </div>
     </div>
   );
 }
