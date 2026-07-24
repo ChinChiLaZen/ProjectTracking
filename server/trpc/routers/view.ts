@@ -2,7 +2,7 @@ import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
 import { meetsMinRole } from "../../../lib/permissions/matrix";
-import { createView, deleteView, getView, listViews } from "../../services/views";
+import { createView, deleteView, getView, listViews, updateView } from "../../services/views";
 import { viewConfigSchema } from "../../../lib/views/viewConfig";
 
 // Trimmed to erase `config`'s Prisma Json type to `unknown` — same fix as
@@ -71,6 +71,34 @@ export const viewRouter = router({
         boardId: input.boardId,
         viewId: input.viewId,
         callerId: ctx.userId,
+      });
+      return trimView(view);
+    }),
+
+  // Fine-grained permission (creator-only for PERSONAL, creator-or-ADMIN for
+  // SHARED) lives in the service — it depends on the existing view's own
+  // visibility/creator, which the router can't know without a lookup.
+  // Mirrors delete's shape: GUEST (board.read) gate here, callerIsAdmin
+  // computed and handed down.
+  update: protectedProcedure
+    .input(
+      z.object({
+        boardId: z.string(),
+        viewId: z.string(),
+        name: z.string().trim().min(1).optional(),
+        config: viewConfigSchema.optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const { role } = await requireBoardAccess(ctx, input.boardId, "GUEST");
+      const view = await updateView({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        viewId: input.viewId,
+        callerId: ctx.userId,
+        callerIsAdmin: meetsMinRole(role, "ADMIN"),
+        name: input.name,
+        config: input.config,
       });
       return trimView(view);
     }),

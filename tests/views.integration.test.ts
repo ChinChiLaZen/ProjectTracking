@@ -5,7 +5,7 @@ import { runWithTenant } from "../server/db/tenantContext";
 import { requireBoardAccess } from "../lib/permissions/requireBoardAccess";
 import { meetsMinRole } from "../lib/permissions/matrix";
 import { createBoard } from "../server/services/boards";
-import { createView, deleteView, getView, listViews } from "../server/services/views";
+import { createView, deleteView, getView, listViews, updateView } from "../server/services/views";
 
 describe("Session 7: saved views", () => {
   let org: { id: string };
@@ -182,6 +182,119 @@ describe("Session 7: saved views", () => {
 
       const memberList = await listViews({ organizationId: org.id, boardId: board.id, callerId: member.id });
       expect(memberList.find((v) => v.id === view.id)).toBeUndefined();
+    });
+  });
+
+  describe("updateView", () => {
+    it("allows the creator to update their own personal view's config", async () => {
+      const view = await createView({
+        organizationId: org.id,
+        boardId: board.id,
+        name: "Personal Draft",
+        visibility: "PERSONAL",
+        config: {},
+        creatorId: member.id,
+      });
+
+      const updated = await updateView({
+        organizationId: org.id,
+        boardId: board.id,
+        viewId: view.id,
+        callerId: member.id,
+        callerIsAdmin: false,
+        config: { filters: [{ columnId: "col-1", operatorKey: "equals", args: ["x"] }] },
+      });
+      expect((updated.config as { filters: unknown[] }).filters).toHaveLength(1);
+    });
+
+    it("allows an ADMIN to update a SHARED view", async () => {
+      const view = await createView({
+        organizationId: org.id,
+        boardId: board.id,
+        name: "Shared Draft",
+        visibility: "SHARED",
+        config: {},
+        creatorId: member.id,
+      });
+
+      const updated = await updateView({
+        organizationId: org.id,
+        boardId: board.id,
+        viewId: view.id,
+        callerId: admin.id,
+        callerIsAdmin: true,
+        name: "Renamed by Admin",
+      });
+      expect(updated.name).toBe("Renamed by Admin");
+    });
+
+    // Same anti-probing shape as getView: an ADMIN can't even see a personal
+    // view that isn't theirs, so updateView 404s before the FORBIDDEN check
+    // is ever reached — consistent with getView, not a separate rule.
+    it("404s an ADMIN updating someone else's PERSONAL view (can't see it, let alone edit it)", async () => {
+      const view = await createView({
+        organizationId: org.id,
+        boardId: board.id,
+        name: "Member's Private Draft",
+        visibility: "PERSONAL",
+        config: {},
+        creatorId: member.id,
+      });
+
+      await expect(
+        updateView({
+          organizationId: org.id,
+          boardId: board.id,
+          viewId: view.id,
+          callerId: admin.id,
+          callerIsAdmin: true,
+          name: "Hijacked",
+        }),
+      ).rejects.toSatisfy((err: unknown) => err instanceof TRPCError && err.code === "NOT_FOUND");
+    });
+
+    it("rejects a non-creator, non-admin MEMBER updating a SHARED view with FORBIDDEN", async () => {
+      const view = await createView({
+        organizationId: org.id,
+        boardId: board.id,
+        name: "Shared, Not Yours",
+        visibility: "SHARED",
+        config: {},
+        creatorId: owner.id,
+      });
+
+      await expect(
+        updateView({
+          organizationId: org.id,
+          boardId: board.id,
+          viewId: view.id,
+          callerId: member.id,
+          callerIsAdmin: false,
+          name: "Hijacked",
+        }),
+      ).rejects.toSatisfy((err: unknown) => err instanceof TRPCError && err.code === "FORBIDDEN");
+    });
+
+    it("rejects an invalid config against viewConfigSchema", async () => {
+      const view = await createView({
+        organizationId: org.id,
+        boardId: board.id,
+        name: "To Corrupt",
+        visibility: "SHARED",
+        config: {},
+        creatorId: owner.id,
+      });
+
+      await expect(
+        updateView({
+          organizationId: org.id,
+          boardId: board.id,
+          viewId: view.id,
+          callerId: owner.id,
+          callerIsAdmin: true,
+          config: { type: "not-a-real-type" },
+        }),
+      ).rejects.toThrow();
     });
   });
 

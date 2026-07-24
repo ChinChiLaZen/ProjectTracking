@@ -56,6 +56,46 @@ export async function getView(params: { organizationId: string; boardId: string;
   });
 }
 
+// Session 8: config validated the same way createView does. Permission is
+// intentionally asymmetric with deleteView: a PERSONAL view can only be
+// updated by its own creator — not even ADMIN, consistent with ADMIN not
+// being able to *see* someone else's personal view via getView either. A
+// SHARED view follows deleteView's "board-config cleanup" framing: creator
+// or ADMIN. No ActivityLog/OutboxEvent (Session 7 precedent: View mutations
+// are board configuration, not board data activity). No version/optimistic
+// concurrency — View has never had one, last-write-wins like Group/Board.
+export async function updateView(params: {
+  organizationId: string;
+  boardId: string;
+  viewId: string;
+  callerId: string;
+  callerIsAdmin: boolean;
+  name?: string;
+  config?: unknown;
+}) {
+  const { organizationId, boardId, viewId, callerId, callerIsAdmin, name, config } = params;
+
+  return runWithTenant(organizationId, async () => {
+    const view = await prisma.view.findFirst({ where: { id: viewId, boardId, organizationId } });
+    // Same anti-probing 404 as getView: a personal view belonging to someone
+    // else doesn't exist as far as this caller can tell.
+    if (!view || (view.visibility === "PERSONAL" && view.creatorId !== callerId)) {
+      throw new TRPCError({ code: "NOT_FOUND" });
+    }
+
+    const canEdit = view.creatorId === callerId || (view.visibility === "SHARED" && callerIsAdmin);
+    if (!canEdit) {
+      throw new TRPCError({ code: "FORBIDDEN" });
+    }
+
+    const data: { name?: string; config?: Prisma.InputJsonValue } = {};
+    if (name !== undefined) data.name = name;
+    if (config !== undefined) data.config = viewConfigSchema.parse(config) as Prisma.InputJsonValue;
+
+    return prisma.view.update({ where: { id: viewId, organizationId }, data });
+  });
+}
+
 // Creator can always delete their own view; ADMIN can delete any view on
 // the board (shared or someone else's personal one) — board-config cleanup,
 // not a privacy grant (getView/listViews still hide personal views from

@@ -239,6 +239,18 @@ async function main() {
     creatorId: owner.id,
   });
 
+  // Session 8 fixture: a second view with a real, non-default filter —
+  // proves the filter/sort-builder's compiled config against real seeded
+  // data, not just the empty default every Session 7 view had.
+  await createView({
+    organizationId: org.id,
+    boardId: board.id,
+    name: "In Progress only",
+    visibility: "SHARED",
+    config: { filters: [{ columnId: statusColumnDef.id, operatorKey: "equals", args: ["doing"] }] },
+    creatorId: owner.id,
+  });
+
   const bigBoardStart = performance.now();
   await runWithTenant(org.id, () => seedBigBoard({ organizationId: org.id, workspaceId: workspace.id }));
   const bigBoardMs = Math.round(performance.now() - bigBoardStart);

@@ -24,6 +24,7 @@ import { getColumnType } from "@/lib/columnTypes/types";
 import { columnTypeRegistry } from "@/lib/columnTypes/registry";
 import { rankBetween } from "@/lib/ordering/rank";
 import { defaultViewConfig, type ViewConfig } from "@/lib/views/viewConfig";
+import { FilterSortBuilder } from "./FilterSortBuilder";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/server/trpc/routers/_app";
 
@@ -404,10 +405,10 @@ function GroupItemList({
   );
 }
 
-// One saved view's config, or the default when no viewId is in the URL
-// (§10.1 Session 7: "the client only ever sends the default" until a
-// filter/sort-builder UI exists — this hook just supplies whichever
-// viewConfig is currently active).
+// One saved view's config, or the default when no viewId is in the URL.
+// This is the *base* config — BoardTable layers an editable draft on top of
+// it (Session 8) before it's actually queried; see the draftConfig state
+// in BoardTable below.
 function useActiveViewConfig(boardId: string, viewId: string | undefined) {
   const viewQuery = trpc.view.get.useQuery(
     { boardId, viewId: viewId ?? "" },
@@ -422,10 +423,24 @@ function useActiveViewConfig(boardId: string, viewId: string | undefined) {
 }
 
 // "Views" panel: lists saved views as links to their shareable URL, plus an
-// inline "save current view as…" form. Session 7 only ever saves the
-// default viewConfig (no filter/sort-builder UI yet) — this still proves
-// persistence and URL-sharing end-to-end, per the approved plan.
-function ViewsPanel({ workspaceId, boardId, viewId }: { workspaceId: string; boardId: string; viewId?: string }) {
+// inline "save current view as…" form and (Session 8) an "Update" button
+// that persists the current draft back onto the loaded view. `draftConfig`
+// is whatever the filter/sort builder currently has live — not necessarily
+// the view's own saved config, which is exactly what makes "save"/"update"
+// meaningful. No client-side permission pre-check for Update — it's shown
+// whenever a view is loaded and a FORBIDDEN response (if any) surfaces the
+// same way every other mutation error does in this component.
+function ViewsPanel({
+  workspaceId,
+  boardId,
+  viewId,
+  draftConfig,
+}: {
+  workspaceId: string;
+  boardId: string;
+  viewId?: string;
+  draftConfig: ViewConfig;
+}) {
   const utils = trpc.useUtils();
   const viewsQuery = trpc.view.list.useQuery({ boardId });
   const [name, setName] = useState("");
@@ -439,6 +454,16 @@ function ViewsPanel({ workspaceId, boardId, viewId }: { workspaceId: string; boa
     },
     onError: (err) => setError(err.message),
   });
+
+  const updateView = trpc.view.update.useMutation({
+    onSuccess: () => {
+      utils.view.list.invalidate({ boardId });
+      utils.view.get.invalidate({ boardId, viewId: viewId ?? "" });
+    },
+    onError: (err) => setError(err.message),
+  });
+
+  const currentView = viewsQuery.data?.find((v) => v.id === viewId);
 
   return (
     <div style={{ margin: "0.5rem 0 1rem", padding: "0.5rem", border: "1px solid #ddd" }}>
@@ -459,13 +484,27 @@ function ViewsPanel({ workspaceId, boardId, viewId }: { workspaceId: string; boa
         ))}
       </ul>
       {error && <p style={{ color: "crimson" }}>{error}</p>}
+      {viewId && currentView && (
+        <p>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              updateView.mutate({ boardId, viewId, config: draftConfig });
+            }}
+            disabled={updateView.isPending}
+          >
+            Update &ldquo;{currentView.name}&rdquo; with current filters/sort
+          </button>
+        </p>
+      )}
       <form
         aria-label="Save current view as"
         onSubmit={(e) => {
           e.preventDefault();
           setError(null);
           if (name.trim().length === 0) return;
-          createView.mutate({ boardId, name: name.trim(), visibility });
+          createView.mutate({ boardId, name: name.trim(), visibility, config: draftConfig });
         }}
         style={{ display: "flex", gap: "0.5rem" }}
       >
@@ -495,7 +534,24 @@ function ViewsPanel({ workspaceId, boardId, viewId }: { workspaceId: string; boa
 export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; workspaceId: string; viewId?: string }) {
   const utils = trpc.useUtils();
   const boardQuery = trpc.board.get.useQuery({ boardId });
-  const viewConfig = useActiveViewConfig(boardId, viewId);
+  // The loaded view's config (or default) is only the *base* — draftConfig
+  // is what the filter/sort builder is actually editing and what every
+  // group's item.list call queries against. Reset whenever the loaded view
+  // changes, using React's "adjust state during render" pattern (comparing
+  // against a mirrored previous value) rather than an effect — setState
+  // synchronously inside a useEffect body causes an extra cascading render
+  // the compiler flags; this variant bails out and re-renders once, before
+  // commit, with no extra round trip. baseViewConfig is referentially
+  // stable across re-renders that don't refetch (react-query / the
+  // module-level defaultViewConfig constant), so this only fires on a real
+  // view switch.
+  const baseViewConfig = useActiveViewConfig(boardId, viewId);
+  const [draftConfig, setDraftConfig] = useState<ViewConfig>(baseViewConfig);
+  const [prevBaseViewConfig, setPrevBaseViewConfig] = useState(baseViewConfig);
+  if (baseViewConfig !== prevBaseViewConfig) {
+    setPrevBaseViewConfig(baseViewConfig);
+    setDraftConfig(baseViewConfig);
+  }
   const [editingCell, setEditingCell] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
@@ -547,7 +603,13 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
 
   return (
     <div style={{ width: "100%" }}>
-      <ViewsPanel workspaceId={workspaceId} boardId={boardId} viewId={viewId} />
+      <ViewsPanel workspaceId={workspaceId} boardId={boardId} viewId={viewId} draftConfig={draftConfig} />
+      <FilterSortBuilder
+        key={viewId ?? "default"}
+        columns={columns}
+        initialConfig={baseViewConfig}
+        onChange={setDraftConfig}
+      />
       {mutationError && <p style={{ color: "crimson" }}>{mutationError}</p>}
       <div role="table" style={{ width: "100%" }}>
         <div role="row" style={{ ...rowStyle, gridTemplateColumns: gridTemplateColumns(columns.length) }}>
@@ -569,7 +631,7 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
                   boardId={boardId}
                   group={group}
                   columns={columns}
-                  viewConfig={viewConfig}
+                  viewConfig={draftConfig}
                   editingCell={editingCell}
                   setEditingCell={setEditingCell}
                   setMutationError={setMutationError}
