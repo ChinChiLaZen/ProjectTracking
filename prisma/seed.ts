@@ -1,10 +1,111 @@
 import "dotenv/config";
+import { createId } from "@paralleldrive/cuid2";
+import { generateNKeysBetween } from "fractional-indexing";
 import { prisma } from "../server/db/client";
 import { runWithTenant } from "../server/db/tenantContext";
 import { createColumnDefinition } from "../server/services/columnDefinitions";
 import { createGroup } from "../server/services/groups";
 import { createItem } from "../server/services/items";
 import { setColumnValue } from "../server/services/columnValues";
+import { textColumn } from "../lib/columnTypes/text";
+import type { Prisma } from "../generated/prisma/client";
+
+const BIG_BOARD_TOTAL_ITEMS = 10_000;
+const BIG_BOARD_GROUP_NAMES = ["Backlog", "In Progress", "Review", "Done"];
+const BIG_BOARD_COLUMN_NAMES = ["Title", "Description", "Owner", "Notes", "Tags"];
+const SEED_BATCH_SIZE = 1000;
+
+// Session 4: the 10k-item perf-fixture board. Bulk-inserted (createMany),
+// bypassing createItem/setColumnValue and their ActivityLog/OutboxEvent
+// writes — a deliberate, scoped exception to "seed goes through the
+// service layer." Routing 10k items x 5 column writes through those
+// services (each several round trips, one with a row lock, one re-fetching
+// every sibling column/value) would take minutes-to-tens-of-minutes for
+// synthetic data with no audit trail worth having. Every other seed
+// fixture keeps using the service layer.
+async function seedBigBoard(params: { organizationId: string; workspaceId: string }) {
+  const { organizationId, workspaceId } = params;
+
+  const board = await prisma.board.create({
+    data: { organizationId, workspaceId, name: "10k Items" },
+  });
+
+  const groupRanks = generateNKeysBetween(null, null, BIG_BOARD_GROUP_NAMES.length);
+  const groups = await Promise.all(
+    BIG_BOARD_GROUP_NAMES.map((name, i) =>
+      prisma.group.create({ data: { organizationId, boardId: board.id, name, rank: groupRanks[i]! } }),
+    ),
+  );
+
+  const columnRanks = generateNKeysBetween(null, null, BIG_BOARD_COLUMN_NAMES.length);
+  const columns = await Promise.all(
+    BIG_BOARD_COLUMN_NAMES.map((name, i) =>
+      prisma.columnDefinition.create({
+        data: { organizationId, boardId: board.id, key: "text", name, settings: {}, rank: columnRanks[i]! },
+      }),
+    ),
+  );
+
+  const itemsPerGroup = BIG_BOARD_TOTAL_ITEMS / groups.length;
+  let itemNumber = 1;
+
+  for (const group of groups) {
+    const ranks = generateNKeysBetween(null, null, itemsPerGroup);
+
+    for (let batchStart = 0; batchStart < itemsPerGroup; batchStart += SEED_BATCH_SIZE) {
+      const batchRanks = ranks.slice(batchStart, batchStart + SEED_BATCH_SIZE);
+
+      // Explicit `id` (rather than letting Prisma's cuid(2) default fill it
+      // in) so ColumnValue rows below can reference itemId without a
+      // round trip to read the created rows back.
+      const itemRows = batchRanks.map((rank) => {
+        const id = createId();
+        const number = itemNumber;
+        itemNumber += 1;
+        return {
+          id,
+          organizationId,
+          boardId: board.id,
+          groupId: group.id,
+          number,
+          name: `Item ${number}`,
+          rank,
+          version: 1,
+        };
+      });
+
+      await prisma.item.createMany({ data: itemRows });
+
+      const valueRows: Prisma.ColumnValueCreateManyInput[] = itemRows.flatMap((item) =>
+        columns.map((column) => {
+          const value = `${column.name} for ${item.name}`;
+          const shadow = textColumn.toShadow({
+            value,
+            settings: {},
+            item: { id: item.id, boardId: board.id, groupId: item.groupId },
+            valuesByColumnId: {},
+            columnsById: {},
+            timeZone: "UTC",
+          });
+          return {
+            id: createId(),
+            itemId: item.id,
+            columnId: column.id,
+            organizationId,
+            boardId: board.id,
+            value,
+            version: 1,
+            ...shadow,
+          };
+        }),
+      );
+
+      await prisma.columnValue.createMany({ data: valueRows });
+    }
+  }
+
+  return board;
+}
 
 async function main() {
   const org = await prisma.organization.create({ data: { name: "Acme Inc" } });
@@ -25,13 +126,13 @@ async function main() {
     ],
   });
 
-  const board = await runWithTenant(org.id, async () => {
-    const workspace = await prisma.workspace.create({
+  const { board, workspace } = await runWithTenant(org.id, async () => {
+    const createdWorkspace = await prisma.workspace.create({
       data: { organizationId: org.id, name: "Main Workspace" },
     });
 
     const createdBoard = await prisma.board.create({
-      data: { organizationId: org.id, workspaceId: workspace.id, name: "Getting Started" },
+      data: { organizationId: org.id, workspaceId: createdWorkspace.id, name: "Getting Started" },
     });
 
     // Guests have no default board access — explicit membership required (§5).
@@ -39,7 +140,7 @@ async function main() {
       data: { boardId: createdBoard.id, userId: guest.id, role: "GUEST" },
     });
 
-    return createdBoard;
+    return { board: createdBoard, workspace: createdWorkspace };
   });
 
   // Session 2 vertical slice fixture: one `text` column, one group, a few
@@ -79,7 +180,11 @@ async function main() {
     });
   }
 
-  console.log("Seeded:", { organizationId: org.id });
+  const bigBoardStart = performance.now();
+  await runWithTenant(org.id, () => seedBigBoard({ organizationId: org.id, workspaceId: workspace.id }));
+  const bigBoardMs = Math.round(performance.now() - bigBoardStart);
+
+  console.log("Seeded:", { organizationId: org.id, bigBoardMs });
 }
 
 main()

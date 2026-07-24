@@ -2,6 +2,24 @@ import { TRPCError } from "@trpc/server";
 import { prisma } from "../db/client";
 import { runWithTenant } from "../db/tenantContext";
 import { firstRank, isValidRank, rankAfter } from "../../lib/ordering/rank";
+import { compileViewConfig } from "../../lib/views/compileQuery";
+import { columnTypeRegistry } from "../../lib/columnTypes/registry";
+import type { ViewConfig } from "../../lib/views/viewConfig";
+import type { Prisma } from "../../generated/prisma/client";
+
+export type BoardColumnValue = {
+  itemId: string;
+  columnId: string;
+  // Erased to `unknown` on purpose: Prisma's recursive JsonValue type,
+  // carried through tRPC + react-query's generics, blows up TS ("type
+  // instantiation is excessively deep") — see the Session 2 decision log.
+  value: unknown;
+  version: number;
+};
+
+function trimValues(rawValues: Array<{ itemId: string; columnId: string; value: unknown; version: number }>): BoardColumnValue[] {
+  return rawValues.map((v) => ({ itemId: v.itemId, columnId: v.columnId, value: v.value, version: v.version }));
+}
 
 export async function createItem(params: {
   organizationId: string;
@@ -130,4 +148,73 @@ export async function moveItem(params: {
       return updated;
     }),
   );
+}
+
+// Session 4: cursor-paginated, filtered, sorted item listing for one group
+// (§6 "cursor-based, per group, default 50 items with load more"). Two
+// query shapes depending on whether an explicit column sort is requested —
+// see lib/views/compileQuery.ts's module comment for why.
+export async function listItemsInGroup(params: {
+  organizationId: string;
+  boardId: string;
+  groupId: string;
+  viewConfig: ViewConfig;
+  cursor?: string;
+  limit?: number;
+}) {
+  const { organizationId, boardId, groupId, viewConfig } = params;
+  const limit = params.limit ?? 50;
+
+  return runWithTenant(organizationId, async () => {
+    const columns = await prisma.columnDefinition.findMany({ where: { boardId, organizationId } });
+    const { itemWhere, sort } = compileViewConfig(viewConfig, columns, columnTypeRegistry);
+
+    // organizationId stays top-level (not nested inside AND) so the
+    // tenant-scoping extension's defense-in-depth check on Item still sees it.
+    const scopedWhere: Prisma.ItemWhereInput = {
+      boardId,
+      groupId,
+      organizationId,
+      ...(itemWhere.AND ? { AND: itemWhere.AND } : {}),
+    };
+
+    if (!sort) {
+      const rows = await prisma.item.findMany({
+        where: scopedWhere,
+        orderBy: [{ rank: "asc" }, { id: "asc" }],
+        take: limit + 1,
+        ...(params.cursor ? { cursor: { id: params.cursor }, skip: 1 } : {}),
+      });
+
+      const hasMore = rows.length > limit;
+      const items = hasMore ? rows.slice(0, limit) : rows;
+      const values = await prisma.columnValue.findMany({
+        where: { itemId: { in: items.map((i) => i.id) }, organizationId },
+      });
+
+      return { items, values: trimValues(values), nextCursor: hasMore ? items[items.length - 1]!.id : null };
+    }
+
+    // Sort-by-column: root the query at ColumnValue for the sort column —
+    // Prisma can't order a to-many relation by a filtered related record's
+    // field, and this hits the (boardId, columnId, shadowField) index directly.
+    const rows = await prisma.columnValue.findMany({
+      where: { columnId: sort.columnId, organizationId, item: scopedWhere },
+      orderBy: [{ [sort.shadowField]: sort.direction }, { itemId: "asc" }],
+      take: limit + 1,
+      ...(params.cursor
+        ? { cursor: { itemId_columnId: { itemId: params.cursor, columnId: sort.columnId } }, skip: 1 }
+        : {}),
+      include: { item: true },
+    });
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const items = page.map((r) => r.item);
+    const values = await prisma.columnValue.findMany({
+      where: { itemId: { in: items.map((i) => i.id) }, organizationId },
+    });
+
+    return { items, values: trimValues(values), nextCursor: hasMore ? page[page.length - 1]!.itemId : null };
+  });
 }

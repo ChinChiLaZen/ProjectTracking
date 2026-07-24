@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
-import { createItem, moveItem } from "../../services/items";
+import { createItem, listItemsInGroup, moveItem } from "../../services/items";
 import { setColumnValue } from "../../services/columnValues";
+import { defaultViewConfig, viewConfigSchema } from "../../../lib/views/viewConfig";
 
 export const itemRouter = router({
   create: protectedProcedure
@@ -69,6 +70,30 @@ export const itemRouter = router({
         rank: input.rank,
         expectedVersion: input.expectedVersion,
         actorId: ctx.userId,
+      });
+    }),
+
+  // Session 4: cursor-paginated, filtered/sorted item list for one group
+  // (§6 "cursor-based, per group, default 50 items with load more").
+  list: protectedProcedure
+    .input(
+      z.object({
+        boardId: z.string(),
+        groupId: z.string(),
+        viewConfig: viewConfigSchema.optional(),
+        cursor: z.string().optional(),
+        limit: z.number().int().min(1).max(200).optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // board.read (§5)
+      return listItemsInGroup({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        groupId: input.groupId,
+        viewConfig: input.viewConfig ?? defaultViewConfig,
+        cursor: input.cursor,
+        limit: input.limit,
       });
     }),
 });

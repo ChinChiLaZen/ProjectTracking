@@ -16,6 +16,7 @@
 
 import type { ComponentType } from "react";
 import type { ZodType } from "zod";
+import type { Prisma } from "../../generated/prisma/client";
 
 /* ------------------------------------------------------------------ */
 /* Shadow columns                                                      */
@@ -79,8 +80,11 @@ export type FilterOperatorDef = {
   toSql: (column: ShadowField, args: unknown[]) => SqlFragment;
 };
 
-/** Replace with the concrete fragment type of the query builder in use. */
-export type SqlFragment = unknown;
+// Session 4: concretized from the original `unknown` placeholder now that
+// the filter compiler (lib/views/compileQuery.ts) actually exists — a
+// fragment of ColumnValue's own where-input, applied inside a
+// `values: { some: { columnId, ...fragment } }` clause per filter.
+export type SqlFragment = Prisma.ColumnValueWhereInput;
 
 /** Shared per-shadow-field operator sets live in lib/columnTypes/operators.ts */
 export type OperatorSets = Record<ShadowField, FilterOperatorDef[]>;
