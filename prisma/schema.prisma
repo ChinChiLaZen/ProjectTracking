@@ -301,15 +301,24 @@ model View {
 // follows the same last-write-wins precedent as Group/Board/View. No
 // edit capability this session — create/list/delete is enough to prove
 // the mechanism, same bar Session 7 used for View.
+//
+// Session 14: mentionedUserIds is a derived, validated projection of
+// `@[Name](userId)` tokens parsed out of `body` at write time (see
+// server/services/updates.ts), mirroring ColumnValue.valueRefIds (§4.2) —
+// `body` stays the canonical/rendered value, this is the indexable/
+// queryable shadow. Nothing reads it yet (no notification consumer
+// exists this session) — same "build the capability now" precedent as
+// OutboxEvent (Phase 1) and rebalanceRanks (Session 3).
 model Update {
-  id             String    @id @default(cuid(2))
-  organizationId String
-  boardId        String
-  itemId         String
-  authorId       String
-  body           String    @db.Text
-  createdAt      DateTime  @default(now())
-  deletedAt      DateTime?
+  id                String    @id @default(cuid(2))
+  organizationId    String
+  boardId           String
+  itemId            String
+  authorId          String
+  body              String    @db.Text
+  mentionedUserIds  String[]  @default([])
+  createdAt         DateTime  @default(now())
+  deletedAt         DateTime?
 
   board  Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
   item   Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
@@ -317,6 +326,7 @@ model Update {
 
   @@index([organizationId])
   @@index([itemId])
+  @@index([mentionedUserIds], type: Gin)
   @@map("updates")
 }
 

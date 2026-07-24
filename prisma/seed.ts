@@ -259,6 +259,16 @@ async function main() {
   await createUpdate({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, authorId: owner.id, body: "Kicking off the review — please add your notes here." });
   await createUpdate({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, authorId: member.id, body: "Looks good so far, just double-checking the timeline." });
 
+  // Session 14 fixture: a comment carrying a real @mention token — proves
+  // the parse/validate/store/render path against real seeded data.
+  await createUpdate({
+    organizationId: org.id,
+    boardId: board.id,
+    itemId: demoItem.id,
+    authorId: owner.id,
+    body: `@[${member.name ?? member.email}](${member.id}) can you take a look at this when you get a chance?`,
+  });
+
   // Session 7 fixture: one shared saved view (default config) on the
   // "Getting Started" board — §9's "every new feature adds its fixture
   // here", and proves the shareable-URL path against real seeded data.

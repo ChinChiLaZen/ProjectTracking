@@ -3,6 +3,7 @@ import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
 import { requireOrgRole } from "../../../lib/permissions/requireOrgRole";
 import { createBoard, deleteBoard, getBoardShell, renameBoard } from "../../services/boards";
+import { listBoardMembers } from "../../services/boardMembers";
 
 export const boardRouter = router({
   // Session 4: shell only (board + groups + columns) — no items/values.
@@ -10,6 +11,14 @@ export const boardRouter = router({
   get: protectedProcedure.input(z.object({ boardId: z.string() })).query(async ({ ctx, input }) => {
     await requireBoardAccess(ctx, input.boardId, "GUEST"); // board.read (§5)
     return getBoardShell(ctx.organizationId, input.boardId);
+  }),
+
+  // Session 14: who's mentionable on this board — same board.read baseline
+  // as board.get/item.list. Also the query PersonEditor's picker gap
+  // (Session 5) has been waiting on, though it isn't wired in this session.
+  listMembers: protectedProcedure.input(z.object({ boardId: z.string() })).query(async ({ ctx, input }) => {
+    await requireBoardAccess(ctx, input.boardId, "GUEST"); // board.read (§5)
+    return listBoardMembers({ organizationId: ctx.organizationId, boardId: input.boardId });
   }),
 
   create: protectedProcedure

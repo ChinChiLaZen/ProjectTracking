@@ -9,10 +9,10 @@ import { createUpdate, deleteUpdate, listUpdates } from "../server/services/upda
 
 describe("Session 13: item updates/comments", () => {
   let org: { id: string };
-  let owner: { id: string };
-  let admin: { id: string };
-  let member: { id: string };
-  let guest: { id: string };
+  let owner: { id: string; email: string };
+  let admin: { id: string; email: string };
+  let member: { id: string; email: string };
+  let guest: { id: string; email: string };
   let workspace: { id: string };
   let board: { id: string };
   let group: { id: string };
@@ -155,5 +155,67 @@ describe("Session 13: item updates/comments", () => {
     const page = await listUpdates({ organizationId: otherOrg.id, boardId: board.id, itemId: item.id });
     expect(page.entries).toEqual([]);
     await prisma.organization.deleteMany({ where: { id: otherOrg.id } });
+  });
+
+  describe("Session 14: @mentions", () => {
+    it("stores a mention token naming a real board member in mentionedUserIds", async () => {
+      const created = await createUpdate({
+        organizationId: org.id,
+        boardId: board.id,
+        itemId: item.id,
+        authorId: owner.id,
+        body: `hey @[${member.email}](${member.id}) take a look`,
+      });
+      expect(created.mentionedUserIds).toEqual([member.id]);
+    });
+
+    it("filters out a mention token naming a user who is not a board member", async () => {
+      const outsider = await prisma.user.create({ data: { email: "updates-outsider@test.dev" } });
+      const created = await createUpdate({
+        organizationId: org.id,
+        boardId: board.id,
+        itemId: item.id,
+        authorId: owner.id,
+        body: `cc @[Outsider](${outsider.id})`,
+      });
+      expect(created.mentionedUserIds).toEqual([]);
+      await prisma.user.deleteMany({ where: { id: outsider.id } });
+    });
+
+    it("captures multiple distinct mentions and dedupes repeats", async () => {
+      const created = await createUpdate({
+        organizationId: org.id,
+        boardId: board.id,
+        itemId: item.id,
+        authorId: owner.id,
+        body: `@[${admin.email}](${admin.id}) and @[${member.email}](${member.id}), also @[${admin.email}](${admin.id}) again`,
+      });
+      expect(new Set(created.mentionedUserIds)).toEqual(new Set([admin.id, member.id]));
+      expect(created.mentionedUserIds.length).toBe(2);
+    });
+
+    it("stores an empty mentionedUserIds array for a comment with no mention tokens", async () => {
+      const created = await createUpdate({
+        organizationId: org.id,
+        boardId: board.id,
+        itemId: item.id,
+        authorId: owner.id,
+        body: "no mentions in this one",
+      });
+      expect(created.mentionedUserIds).toEqual([]);
+    });
+
+    it("listUpdates returns mentionedUserIds on each entry", async () => {
+      const created = await createUpdate({
+        organizationId: org.id,
+        boardId: board.id,
+        itemId: item.id,
+        authorId: owner.id,
+        body: `@[${member.email}](${member.id})`,
+      });
+      const page = await listUpdates({ organizationId: org.id, boardId: board.id, itemId: item.id });
+      const entry = page.entries.find((e) => e.id === created.id);
+      expect(entry?.mentionedUserIds).toEqual([member.id]);
+    });
   });
 });

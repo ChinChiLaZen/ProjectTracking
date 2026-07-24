@@ -1,22 +1,45 @@
 import { TRPCError } from "@trpc/server";
 import { prisma } from "../db/client";
 import { runWithTenant } from "../db/tenantContext";
+import { extractMentionedUserIds } from "../../lib/mentions/mentions";
+import { listBoardMembers } from "./boardMembers";
 
 export type UpdateEntry = {
   id: string;
   itemId: string;
   authorId: string;
   body: string;
+  mentionedUserIds: string[];
   createdAt: Date;
 };
 
-function trimUpdate(u: { id: string; itemId: string; authorId: string; body: string; createdAt: Date }): UpdateEntry {
-  return { id: u.id, itemId: u.itemId, authorId: u.authorId, body: u.body, createdAt: u.createdAt };
+function trimUpdate(u: {
+  id: string;
+  itemId: string;
+  authorId: string;
+  body: string;
+  mentionedUserIds: string[];
+  createdAt: Date;
+}): UpdateEntry {
+  return {
+    id: u.id,
+    itemId: u.itemId,
+    authorId: u.authorId,
+    body: u.body,
+    mentionedUserIds: u.mentionedUserIds,
+    createdAt: u.createdAt,
+  };
 }
 
 // A comment on an Item — real board *data* activity (unlike View, which is
 // board configuration), so this writes ActivityLog + OutboxEvent the same
 // way item.create/setColumnValue do, all in one transaction (§11).
+//
+// mentionedUserIds (Session 14) is computed as the intersection of every
+// `@[name](userId)` token parsed out of `body` and the board's real member
+// ids — a client can't fabricate a mention token naming an arbitrary or
+// unauthorized user id and have it "count". This is a read, not a write,
+// so it happens before the transaction rather than via `tx`.
 export async function createUpdate(params: {
   organizationId: string;
   boardId: string;
@@ -26,6 +49,14 @@ export async function createUpdate(params: {
 }) {
   const { organizationId, boardId, itemId, authorId, body } = params;
 
+  const candidateIds = extractMentionedUserIds(body);
+  let mentionedUserIds: string[] = [];
+  if (candidateIds.length > 0) {
+    const members = await listBoardMembers({ organizationId, boardId });
+    const memberIds = new Set(members.map((m) => m.userId));
+    mentionedUserIds = candidateIds.filter((id) => memberIds.has(id));
+  }
+
   return runWithTenant(organizationId, () =>
     prisma.$transaction(async (tx) => {
       const item = await tx.item.findFirst({ where: { id: itemId, boardId, organizationId } });
@@ -34,7 +65,7 @@ export async function createUpdate(params: {
       }
 
       const update = await tx.update.create({
-        data: { organizationId, boardId, itemId, authorId, body },
+        data: { organizationId, boardId, itemId, authorId, body, mentionedUserIds },
       });
 
       await tx.activityLog.create({
