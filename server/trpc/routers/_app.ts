@@ -9,6 +9,7 @@ import { viewRouter } from "./view";
 import { searchRouter } from "./search";
 import { updateRouter } from "./update";
 import { notificationRouter } from "./notification";
+import { attachmentRouter } from "./attachment";
 
 export const appRouter = router({
   workspace: workspaceRouter,
@@ -21,6 +22,7 @@ export const appRouter = router({
   search: searchRouter,
   update: updateRouter,
   notification: notificationRouter,
+  attachment: attachmentRouter,
 });
 
 export type AppRouter = typeof appRouter;

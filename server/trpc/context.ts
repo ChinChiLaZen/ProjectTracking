@@ -7,8 +7,13 @@ import { prisma } from "../db/client";
 // input (Ground rule #4). A user with memberships in multiple orgs picking
 // "first membership" is a known Session-1 simplification; an explicit
 // active-organization switcher is Phase 1+ scope.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by fetchRequestHandler's createContext signature
-export async function createContext(_opts: FetchCreateContextFnOptions) {
+//
+// Session 16: extracted out of createContext so the attachment upload/
+// download Route Handlers (the first non-tRPC authenticated routes in this
+// codebase — multipart file bodies have no tRPC transport) can resolve the
+// same userId/organizationId the exact same way, without a second copy of
+// this logic drifting out of sync with tRPC's.
+export async function resolveSessionContext() {
   const session = await getServerSession(authOptions);
 
   let userId: string | undefined;
@@ -20,6 +25,12 @@ export async function createContext(_opts: FetchCreateContextFnOptions) {
     organizationId = membership?.organizationId;
   }
 
+  return { session, userId, organizationId };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- required by fetchRequestHandler's createContext signature
+export async function createContext(_opts: FetchCreateContextFnOptions) {
+  const { session, userId, organizationId } = await resolveSessionContext();
   return { prisma, session, userId, organizationId };
 }
 

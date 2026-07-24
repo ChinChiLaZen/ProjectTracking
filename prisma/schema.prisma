@@ -52,6 +52,7 @@ model User {
   boardMemberships BoardMembership[]
   updates          Update[]
   notifications    Notification[]
+  attachments      Attachment[]
 
   @@map("users")
 }
@@ -109,6 +110,7 @@ model Board {
   views             View[]
   updates           Update[]
   notifications     Notification[]
+  attachments       Attachment[]
 
   @@index([organizationId])
   @@index([workspaceId])
@@ -176,6 +178,7 @@ model Item {
   outboxEvents  OutboxEvent[]
   updates       Update[]
   notifications Notification[]
+  attachments   Attachment[]
 
   @@unique([boardId, number])
   @@index([organizationId])
@@ -332,6 +335,35 @@ model Update {
   @@index([itemId])
   @@index([mentionedUserIds], type: Gin)
   @@map("updates")
+}
+
+// Session 16: a file attached to an Item — mirrors Update's itemId-scoping
+// (no per-comment attachments this session, flagged as a possible future
+// extension, not built). storageKey is adapter-opaque (an S3 object key or
+// a local relative path) — only lib/storage/*'s adapters interpret it;
+// service/router code never does. Soft-deleted, matching Update. No
+// version field, same last-write-wins precedent as everything without an
+// edit capability (there's no edit here either — delete-and-reupload).
+model Attachment {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  boardId        String
+  itemId         String
+  uploaderId     String
+  fileName       String
+  mimeType       String
+  fileSize       Int
+  storageKey     String
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  board    Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  item     Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  uploader User  @relation(fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([itemId])
+  @@map("attachments")
 }
 
 // Session 15: one row per (recipient, triggering Update) — @@unique is the

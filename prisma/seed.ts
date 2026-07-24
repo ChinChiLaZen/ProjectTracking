@@ -10,6 +10,7 @@ import { setColumnValue } from "../server/services/columnValues";
 import { createView } from "../server/services/views";
 import { createUpdate } from "../server/services/updates";
 import { deliverMentionEmails } from "../server/services/notificationRelay";
+import { createAttachment } from "../server/services/attachments";
 import { textColumn } from "../lib/columnTypes/text";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -268,6 +269,22 @@ async function main() {
     itemId: demoItem.id,
     authorId: owner.id,
     body: `@[${member.name ?? member.email}](${member.id}) can you take a look at this when you get a chance?`,
+  });
+
+  // Session 16 fixture: a real, valid 1x1 PNG attached to the demo item —
+  // proves the validate/store/download path against real seeded data
+  // (local-disk adapter in dev by default, since S3_BUCKET is unset here).
+  await createAttachment({
+    organizationId: org.id,
+    boardId: board.id,
+    itemId: demoItem.id,
+    uploaderId: owner.id,
+    fileName: "demo.png",
+    mimeType: "image/png",
+    body: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
   });
 
   // Session 7 fixture: one shared saved view (default config) on the

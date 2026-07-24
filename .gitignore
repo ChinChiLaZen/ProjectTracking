@@ -42,3 +42,6 @@ yarn-error.log*
 next-env.d.ts
 
 /generated/prisma
+
+# Session 16: local-disk storage adapter's file store (dev only)
+/.uploads
