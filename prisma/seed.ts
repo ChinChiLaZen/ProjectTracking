@@ -205,6 +205,21 @@ async function main() {
   const numberColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "number", name: "Estimate" });
   const checkboxColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "checkbox", name: "Done?" });
   const longTextColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "long_text", name: "Notes" });
+  // Session 11 fixtures: dropdown + timeline column types.
+  const priorityColumnDef = await createColumnDefinition({
+    organizationId: org.id,
+    boardId: board.id,
+    key: "dropdown",
+    name: "Priority",
+    settings: {
+      options: [
+        { id: "low", label: "Low", order: 0 },
+        { id: "medium", label: "Medium", order: 1 },
+        { id: "high", label: "High", color: "#c00", order: 2 },
+      ],
+    },
+  });
+  const timelineColumnDef = await createColumnDefinition({ organizationId: org.id, boardId: board.id, key: "timeline", name: "Project window" });
 
   const demoItem = await createItem({
     organizationId: org.id,
@@ -225,6 +240,8 @@ async function main() {
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: todoItems[1]!.id, columnId: dateColumnDef.id, value: "2026-08-03", expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: todoItems[2]!.id, columnId: dateColumnDef.id, value: "2026-08-10", expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: numberColumnDef.id, value: 5, expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: priorityColumnDef.id, value: "high", expectedVersion: 0, actorId: owner.id });
+  await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: timelineColumnDef.id, value: { start: "2026-08-01", end: "2026-08-07" }, expectedVersion: 0, actorId: owner.id });
   await setColumnValue({ organizationId: org.id, boardId: board.id, itemId: demoItem.id, columnId: checkboxColumnDef.id, value: false, expectedVersion: 0, actorId: owner.id });
   await setColumnValue({
     organizationId: org.id,

@@ -6,6 +6,8 @@ import { personColumn } from "./person";
 import { dateColumn } from "./date";
 import { numberColumn } from "./number";
 import { checkboxColumn } from "./checkbox";
+import { dropdownColumn } from "./dropdown";
+import { timelineColumn } from "./timeline";
 
 // The ONLY place that maps a ColumnDefinition.key to its implementation
 // (§1 rule 6). Lookup itself lives in ./types (getColumnType) — this file
@@ -18,4 +20,6 @@ export const columnTypeRegistry: ColumnTypeRegistry = {
   date: dateColumn,
   number: numberColumn,
   checkbox: checkboxColumn,
+  dropdown: dropdownColumn,
+  timeline: timelineColumn,
 };

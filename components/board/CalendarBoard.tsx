@@ -21,6 +21,20 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// A `date` column's canonical value is a plain "YYYY-MM-DD" string; a
+// `timeline` column's (Session 11) is `{start, end}` — bucket a timeline
+// item on its start day. Full range-spanning display across multiple day
+// cells is deferred to a future Gantt-focused session (§6 treats Calendar
+// and Gantt as separate views); this just keeps a timeline item from
+// silently vanishing when chosen as Calendar's date column.
+function dayKeyForDateValue(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (value && typeof value === "object" && "start" in value && typeof (value as { start: unknown }).start === "string") {
+    return (value as { start: string }).start;
+  }
+  return null;
+}
+
 // One real month at a time — no week/day views, no "unscheduled items"
 // list (an item with no value for dateColumn just doesn't appear). Query
 // range = the rendered grid (may dip into adjacent months for a full
@@ -54,12 +68,14 @@ export function CalendarBoard({
 
   const itemsByDate = new Map<string, { id: string; name: string }[]>();
   for (const value of query.data?.values ?? []) {
-    if (value.columnId !== dateColumn.id || typeof value.value !== "string") continue;
+    if (value.columnId !== dateColumn.id) continue;
+    const dayKey = dayKeyForDateValue(value.value);
+    if (dayKey === null) continue;
     const item = query.data?.items.find((i) => i.id === value.itemId);
     if (!item) continue;
-    const list = itemsByDate.get(value.value) ?? [];
+    const list = itemsByDate.get(dayKey) ?? [];
     list.push({ id: item.id, name: item.name });
-    itemsByDate.set(value.value, list);
+    itemsByDate.set(dayKey, list);
   }
 
   function goToPreviousMonth() {

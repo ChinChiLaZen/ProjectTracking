@@ -11,16 +11,19 @@ const EMPTY_BUCKET_KEY = "__empty__";
 // over data item.list already correctly paginated, not a second DB query
 // (§6: "views differ in presentation and grouping only").
 //
-// `status` is special-cased to enumerate every configured option (even
-// ones with zero items right now) in its configured order, plus one
-// explicit "No value" bucket — otherwise an empty status column never
+// `status`/`dropdown` are special-cased to enumerate every configured
+// option (even ones with zero items right now) in its configured order,
+// plus one explicit "No value" bucket — otherwise an empty option never
 // renders as a droppable Kanban bucket and becomes unreachable by drag
 // (closes the gap Session 5 flagged when no Kanban view existed to make it
-// matter). Every other groupable type (`person`) only buckets *observed*
-// values, in first-seen order — there's no board-membership list yet to
-// enumerate "every possible person" (same gap Session 5 flagged for the
-// people-picker), so this is a known, carried-forward limitation, not a
-// new one.
+// matter). Kept as an explicit key check, not generalized to shadowField
+// the way isKanbanGroupable/valueForGroupKey were (Session 11) — the
+// underlying trait, "has an exhaustive settings.options list," isn't part
+// of the registry's type contract the way shadowField is. Every other
+// groupable type (`person`) only buckets *observed* values, in first-seen
+// order — there's no board-membership list yet to enumerate "every
+// possible person" (same gap Session 5 flagged for the people-picker), so
+// this is a known, carried-forward limitation, not a new one.
 export function bucketItemsByGroupKeys<T extends { id: string }>(
   items: T[],
   valueFor: (itemId: string) => unknown,
@@ -30,7 +33,7 @@ export function bucketItemsByGroupKeys<T extends { id: string }>(
 ): KanbanBucket[] {
   const byKey = new Map<string, KanbanBucket>();
 
-  if (columnType.key === "status") {
+  if (columnType.key === "status" || columnType.key === "dropdown") {
     const options = (settings as { options?: StatusOption[] } | undefined)?.options ?? [];
     for (const option of [...options].sort((a, b) => a.order - b.order)) {
       byKey.set(option.id, { key: option.id, label: option.label, color: option.color, itemIds: [] });

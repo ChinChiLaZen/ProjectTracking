@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { statusColumn } from "../columnTypes/status";
 import { personColumn } from "../columnTypes/person";
+import { dropdownColumn } from "../columnTypes/dropdown";
 import { bucketItemsByGroupKeys } from "./bucketItemsByGroupKeys";
 
 const statusSettings = {
@@ -35,6 +36,25 @@ describe("bucketItemsByGroupKeys — status", () => {
     const buckets = bucketItemsByGroupKeys(items, (id) => values[id], statusColumn, statusSettings);
     expect(buckets.find((b) => b.key === "todo")?.itemIds).toEqual(["i1", "i2"]);
     expect(buckets.find((b) => b.key === "doing")?.itemIds).toEqual(["i3"]);
+  });
+});
+
+describe("bucketItemsByGroupKeys — dropdown", () => {
+  it("enumerates every configured option in configured order too, same as status", () => {
+    const dropdownSettings = {
+      options: [
+        { id: "opt-high", label: "High", order: 2 },
+        { id: "opt-low", label: "Low", order: 0 },
+        { id: "opt-medium", label: "Medium", order: 1 },
+      ],
+    };
+    const items = [{ id: "i1" }];
+    const values: Record<string, unknown> = { i1: "opt-low" };
+    const buckets = bucketItemsByGroupKeys(items, (id) => values[id], dropdownColumn, dropdownSettings);
+
+    expect(buckets.map((b) => b.key)).toEqual(["opt-low", "opt-medium", "opt-high", "__empty__"]);
+    expect(buckets.find((b) => b.key === "opt-high")?.itemIds).toEqual([]);
+    expect(buckets.find((b) => b.key === "opt-low")?.itemIds).toEqual(["i1"]);
   });
 });
 

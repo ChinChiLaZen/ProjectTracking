@@ -638,7 +638,7 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
               onChange={(e) => setDraftConfig((prev) => ({ ...prev, groupBy: e.target.value || null }))}
             >
               <option value="">— choose a column —</option>
-              {columns.filter((c) => isKanbanGroupable(c.key)).map((c) => (
+              {columns.filter((c) => isKanbanGroupable(getColumnType(columnTypeRegistry, c.key).shadowField)).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>

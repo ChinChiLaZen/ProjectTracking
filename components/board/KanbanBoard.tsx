@@ -213,7 +213,7 @@ function KanbanGroupSwimlanes({
 
     let newValue: unknown;
     try {
-      newValue = valueForGroupKey(groupByColumn.key, currentValue, sourceBucketKey ?? "__empty__", targetBucketKey);
+      newValue = valueForGroupKey(columnType.shadowField, currentValue, sourceBucketKey ?? "__empty__", targetBucketKey);
     } catch {
       setMutationError("This column type doesn't support Kanban drag.");
       return;
