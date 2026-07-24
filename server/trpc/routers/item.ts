@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
-import { createItem } from "../../services/items";
+import { createItem, moveItem } from "../../services/items";
 import { setColumnValue } from "../../services/columnValues";
 
 export const itemRouter = router({
@@ -47,5 +47,28 @@ export const itemRouter = router({
       // TS's inference through useMutation's optimistic-update generics.
       const value: unknown = columnValue.value;
       return { itemId: columnValue.itemId, columnId: columnValue.columnId, value, version: columnValue.version };
+    }),
+
+  move: protectedProcedure
+    .input(
+      z.object({
+        boardId: z.string(),
+        itemId: z.string(),
+        groupId: z.string(),
+        rank: z.string().min(1),
+        expectedVersion: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // item.edit (§5)
+      return moveItem({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        itemId: input.itemId,
+        groupId: input.groupId,
+        rank: input.rank,
+        expectedVersion: input.expectedVersion,
+        actorId: ctx.userId,
+      });
     }),
 });
