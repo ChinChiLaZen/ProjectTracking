@@ -9,6 +9,7 @@ import { createItem } from "../server/services/items";
 import { setColumnValue } from "../server/services/columnValues";
 import { createView } from "../server/services/views";
 import { createUpdate } from "../server/services/updates";
+import { deliverMentionEmails } from "../server/services/notificationRelay";
 import { textColumn } from "../lib/columnTypes/text";
 import type { Prisma } from "../generated/prisma/client";
 
@@ -319,7 +320,14 @@ async function main() {
   await runWithTenant(org.id, () => seedBigBoard({ organizationId: org.id, workspaceId: workspace.id }));
   const bigBoardMs = Math.round(performance.now() - bigBoardStart);
 
-  console.log("Seeded:", { organizationId: org.id, bigBoardMs });
+  // Session 15 fixture: run the (still-unscheduled) email relay once here
+  // so `pnpm db:seed` proves the whole mention -> email path against the
+  // Session 14 mention fixture above, with zero new seed code — a free
+  // second reader of a fixture that already exists (same "second reader for
+  // free" precedent as the activity feed reading Update rows in Session 13).
+  const relayResult = await deliverMentionEmails();
+
+  console.log("Seeded:", { organizationId: org.id, bigBoardMs, relayResult });
 }
 
 main()

@@ -6,3 +6,10 @@ services:
   redis:
     image: redis:7
     ports: ["6379:6379"]
+  # Session 15: local SMTP catcher + web UI, so notification email (and
+  # NextAuth's magic-link email) can actually be viewed in dev without a
+  # real SMTP account — matches EMAIL_SERVER's existing localhost:1025
+  # assumption in .env.example (§2.1's "zero external accounts" philosophy).
+  maildev:
+    image: maildev/maildev
+    ports: ["1080:1080", "1025:1025"]

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import { trpc } from "@/lib/trpc/client";
+import { NotificationBell } from "@/components/NotificationBell";
 
 // Minimal UI (Session 6) — plain inline form, no modal/design polish.
 function CreateBoardForm({ workspaceId }: { workspaceId: string }) {
@@ -104,8 +105,11 @@ export default function Home() {
 
   return (
     <main style={{ maxWidth: 480, margin: "4rem auto", display: "grid", gap: "1rem" }}>
-      <p>
-        Signed in as {session.user?.email} — <button onClick={() => signOut()}>Sign out</button>
+      <p style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>
+          Signed in as {session.user?.email} — <button onClick={() => signOut()}>Sign out</button>
+        </span>
+        <NotificationBell />
       </p>
       <h1>Workspaces</h1>
       {workspaces.isLoading && <p>Loading…</p>}

@@ -1,5 +1,6 @@
 import { BoardTable } from "@/components/board/BoardTable";
 import { ActivityFeed } from "@/components/board/ActivityFeed";
+import { NotificationBell } from "@/components/NotificationBell";
 
 // [[...view]] reserves the route shape for Kanban/Calendar/etc. (§2, §6).
 // Session 7: the first (and only) segment is read as a saved View id — a
@@ -14,6 +15,9 @@ export default async function BoardPage({
 
   return (
     <main style={{ maxWidth: 1000, margin: "2rem auto", padding: "0 1rem" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+        <NotificationBell />
+      </div>
       <BoardTable boardId={boardId} workspaceId={workspaceId} viewId={viewId} />
       <ActivityFeed boardId={boardId} />
     </main>

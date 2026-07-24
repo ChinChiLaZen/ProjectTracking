@@ -86,13 +86,34 @@ export async function createUpdate(params: {
           boardId,
           itemId,
           type: "item.update_created",
-          payload: { updateId: update.id, body },
+          payload: { updateId: update.id, body, mentionedUserIds },
           actorType: "USER",
           actorId: authorId,
           depth: 0,
           causedByAutomationIds: [],
         },
       });
+
+      // In-app notifications are first-party application data (like
+      // ActivityLog above), not a cross-boundary delivery problem, so they
+      // go in the same transaction rather than through the outbox — no
+      // queue needed. Self-mentions don't notify (mentioning yourself
+      // shouldn't page yourself). @@unique([recipientId, updateId]) +
+      // skipDuplicates makes this safe to re-run.
+      const recipientIds = mentionedUserIds.filter((id) => id !== authorId);
+      if (recipientIds.length > 0) {
+        await tx.notification.createMany({
+          data: recipientIds.map((recipientId) => ({
+            organizationId,
+            recipientId,
+            boardId,
+            itemId,
+            updateId: update.id,
+            type: "mention",
+          })),
+          skipDuplicates: true,
+        });
+      }
 
       return trimUpdate(update);
     }),

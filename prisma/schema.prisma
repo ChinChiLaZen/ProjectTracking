@@ -51,6 +51,7 @@ model User {
   memberships      Membership[]
   boardMemberships BoardMembership[]
   updates          Update[]
+  notifications    Notification[]
 
   @@map("users")
 }
@@ -107,6 +108,7 @@ model Board {
   outboxEvents      OutboxEvent[]
   views             View[]
   updates           Update[]
+  notifications     Notification[]
 
   @@index([organizationId])
   @@index([workspaceId])
@@ -170,9 +172,10 @@ model Item {
   board        Board         @relation(fields: [boardId], references: [id], onDelete: Cascade)
   group        Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
   values       ColumnValue[]
-  activityLogs ActivityLog[]
-  outboxEvents OutboxEvent[]
-  updates      Update[]
+  activityLogs  ActivityLog[]
+  outboxEvents  OutboxEvent[]
+  updates       Update[]
+  notifications Notification[]
 
   @@unique([boardId, number])
   @@index([organizationId])
@@ -320,14 +323,49 @@ model Update {
   createdAt         DateTime  @default(now())
   deletedAt         DateTime?
 
-  board  Board @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  item   Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  author User  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  board         Board          @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  item          Item           @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  author        User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  notifications Notification[]
 
   @@index([organizationId])
   @@index([itemId])
   @@index([mentionedUserIds], type: Gin)
   @@map("updates")
+}
+
+// Session 15: one row per (recipient, triggering Update) — @@unique is the
+// literal "deduped" mechanism Phase 3's done-when names. Written in the
+// same transaction as the triggering Update (server/services/updates.ts),
+// same reasoning ActivityLog already uses: first-party application data,
+// not a cross-boundary delivery problem, so it needs no queue. `type` is a
+// plain string (only "mention" exists this session) so a future
+// notification type needs no migration. emailSentAt is the separate,
+// idempotent marker for the *email* half of delivery — see
+// server/services/notificationRelay.ts, which is the piece that does need
+// outbox/relay treatment (an external SMTP call, not first-party data).
+// Not soft-deleted — operational data, matching ActivityLog/OutboxEvent.
+model Notification {
+  id             String    @id @default(cuid(2))
+  organizationId String
+  recipientId    String
+  boardId        String
+  itemId         String
+  updateId       String
+  type           String
+  readAt         DateTime?
+  emailSentAt    DateTime?
+  createdAt      DateTime  @default(now())
+
+  recipient User   @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+  board     Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  item      Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  update    Update @relation(fields: [updateId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, updateId])
+  @@index([organizationId])
+  @@index([recipientId, readAt])
+  @@map("notifications")
 }
 
 // Explicit per-board role, overriding the org-level default (§5).

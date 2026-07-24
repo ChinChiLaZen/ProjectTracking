@@ -18,6 +18,7 @@ const TENANT_SCOPED_MODELS = new Set([
   "OutboxEvent",
   "View",
   "Update",
+  "Notification",
 ]);
 // ColumnValue/ActivityLog/OutboxEvent are append-only or overwrite-in-place
 // (no deletedAt column) — soft delete only applies to Group/Item/ColumnDefinition/View/Update.
