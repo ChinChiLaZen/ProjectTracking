@@ -1,40 +1,12 @@
-"use client";
-
-import { useState } from "react";
 import { z } from "zod";
-import type { CellProps, ColumnType, EditorProps } from "./types";
+import type { ColumnType } from "./types";
+import { DateCell, DateEditor } from "./date.client";
 
 const valueSchema = z.iso.date().nullable();
 const settingsSchema = z.object({});
 
-type DateValue = z.infer<typeof valueSchema>;
-type DateSettings = z.infer<typeof settingsSchema>;
-
-function DateCell({ value, readOnly }: CellProps<DateValue, DateSettings>) {
-  return (
-    <div style={{ minHeight: "1.2em", opacity: readOnly ? 0.6 : 1, cursor: readOnly ? "default" : "text" }}>
-      {value ?? ""}
-    </div>
-  );
-}
-
-function DateEditor({ value, onChange, onCancel }: EditorProps<DateValue, DateSettings>) {
-  const [draft, setDraft] = useState(value ?? "");
-
-  return (
-    <input
-      type="date"
-      autoFocus
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onChange(draft === "" ? null : draft)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onChange(draft === "" ? null : draft);
-        if (e.key === "Escape") onCancel();
-      }}
-    />
-  );
-}
+export type DateValue = z.infer<typeof valueSchema>;
+export type DateSettings = z.infer<typeof settingsSchema>;
 
 export const dateColumn: ColumnType<DateValue, DateSettings> = {
   key: "date",

@@ -4,6 +4,7 @@ import { runWithTenant } from "../db/tenantContext";
 import { firstRank, isValidRank, rankAfter } from "../../lib/ordering/rank";
 import { compileViewConfig } from "../../lib/views/compileQuery";
 import { columnTypeRegistry } from "../../lib/columnTypes/registry";
+import { writeColumnValueInTx } from "./columnValues";
 import type { ViewConfig } from "../../lib/views/viewConfig";
 import type { Prisma } from "../../generated/prisma/client";
 
@@ -146,6 +147,94 @@ export async function moveItem(params: {
       });
 
       return updated;
+    }),
+  );
+}
+
+// Kanban drag (§6/§10.1 Session 9): "one setColumnValue + one rank update
+// in a single transaction" — a card moving between Kanban buckets changes
+// both its rank (append to the end of the target bucket) and the grouping
+// column's value (e.g. status). Combining them into one transaction is the
+// whole point: two separate round trips could leave a card silently
+// misplaced if the second one failed. Never changes the item's real board
+// Group (Kanban buckets are a display-layer grouping within a Group, not
+// the Group itself) — accepts no groupId, unlike moveItem.
+export async function moveKanbanItem(params: {
+  organizationId: string;
+  boardId: string;
+  itemId: string;
+  rank: string;
+  expectedItemVersion: number;
+  columnId: string;
+  value: unknown;
+  expectedColumnVersion: number;
+  actorId: string;
+}) {
+  const { organizationId, boardId, itemId, rank, expectedItemVersion, columnId, value, expectedColumnVersion, actorId } =
+    params;
+
+  if (!isValidRank(rank)) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid rank" });
+  }
+
+  return runWithTenant(organizationId, () =>
+    prisma.$transaction(async (tx) => {
+      const item = await tx.item.findFirst({ where: { id: itemId, boardId, organizationId } });
+      if (!item) {
+        throw new TRPCError({ code: "NOT_FOUND" });
+      }
+
+      if (item.version !== expectedItemVersion) {
+        throw new TRPCError({ code: "CONFLICT" });
+      }
+
+      const updatedItem = await tx.item.update({
+        where: { id: itemId, organizationId },
+        data: { rank, version: { increment: 1 } },
+      });
+
+      await tx.activityLog.create({
+        data: {
+          organizationId,
+          boardId,
+          itemId,
+          actorType: "USER",
+          actorId,
+          type: "item.moved",
+          payload: { rank },
+        },
+      });
+
+      await tx.outboxEvent.create({
+        data: {
+          organizationId,
+          boardId,
+          itemId,
+          type: "item.moved",
+          payload: { rank },
+          actorType: "USER",
+          actorId,
+          depth: 0,
+          causedByAutomationIds: [],
+        },
+      });
+
+      // Same validate+shadow-project+version-check+upsert+log logic
+      // setColumnValue uses standalone — reused here so both writes commit
+      // or roll back together (§4.2/§7's version-conflict semantics stay
+      // identical for a Kanban drag as for a direct cell edit; only the
+      // caller's transaction boundary is wider).
+      const columnValue = await writeColumnValueInTx(tx, {
+        organizationId,
+        boardId,
+        itemId,
+        columnId,
+        value,
+        expectedVersion: expectedColumnVersion,
+        actorId,
+      });
+
+      return { item: updatedItem, columnValue };
     }),
   );
 }

@@ -1,7 +1,6 @@
-"use client";
-
 import { z } from "zod";
-import type { CellProps, ColumnType, EditorProps } from "./types";
+import type { ColumnType } from "./types";
+import { StatusCell, StatusEditor } from "./status.client";
 
 // §4.2: option sets live on ColumnDefinition.settings as {id,label,color,order}[];
 // values reference optionId, never the label, so renaming an option doesn't
@@ -16,50 +15,15 @@ const optionSchema = z.object({
 const valueSchema = z.string().nullable();
 const settingsSchema = z.object({ options: z.array(optionSchema).default([]) });
 
-type StatusValue = z.infer<typeof valueSchema>;
-type StatusSettings = z.infer<typeof settingsSchema>;
+export type StatusValue = z.infer<typeof valueSchema>;
+export type StatusSettings = z.infer<typeof settingsSchema>;
 
+// Duplicated (also in status.client.tsx) rather than shared — sharing it
+// would require status.client.tsx to import a value from this file while
+// this file already imports Cell/Editor from status.client.tsx, a real
+// circular runtime dependency. This one-liner is cheap to keep in sync.
 function resolveOption(value: StatusValue, settings: StatusSettings) {
   return value === null ? null : (settings.options.find((o) => o.id === value) ?? null);
-}
-
-function StatusCell({ value, settings, readOnly }: CellProps<StatusValue, StatusSettings>) {
-  const option = resolveOption(value, settings);
-  return (
-    <div style={{ opacity: readOnly ? 0.6 : 1, cursor: readOnly ? "default" : "pointer" }}>
-      {option ? (
-        <span style={{ background: option.color ?? "#eee", padding: "0.1rem 0.5rem", borderRadius: 4 }}>
-          {option.label}
-        </span>
-      ) : (
-        // Falls back to the raw id if the option was since deleted from
-        // settings — no reconcileValues migration wired up yet (§4.2
-        // Decision 4 exists for exactly this; there's no column-settings-
-        // update procedure at all yet to call it from).
-        (value ?? "")
-      )}
-    </div>
-  );
-}
-
-function StatusEditor({ value, settings, onChange, onCancel }: EditorProps<StatusValue, StatusSettings>) {
-  return (
-    <select
-      autoFocus
-      value={value ?? ""}
-      onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onCancel();
-      }}
-    >
-      <option value="">—</option>
-      {settings.options.map((option) => (
-        <option key={option.id} value={option.id}>
-          {option.label}
-        </option>
-      ))}
-    </select>
-  );
 }
 
 export const statusColumn: ColumnType<StatusValue, StatusSettings> = {

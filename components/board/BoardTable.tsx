@@ -24,7 +24,9 @@ import { getColumnType } from "@/lib/columnTypes/types";
 import { columnTypeRegistry } from "@/lib/columnTypes/registry";
 import { rankBetween } from "@/lib/ordering/rank";
 import { defaultViewConfig, type ViewConfig } from "@/lib/views/viewConfig";
+import { isKanbanGroupable } from "@/lib/views/kanbanGroupKeyValue";
 import { FilterSortBuilder } from "./FilterSortBuilder";
+import { KanbanBoard } from "./KanbanBoard";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@/server/trpc/routers/_app";
 
@@ -45,11 +47,14 @@ type BoardColumnValue = ItemListPage["values"][number];
 const ROW_HEIGHT = 36;
 const GROUP_MAX_HEIGHT = 400;
 
-function cellKey(itemId: string, columnId: string) {
+export function cellKey(itemId: string, columnId: string) {
   return `${itemId}:${columnId}`;
 }
 
-function sortByRank<T extends { rank: string }>(rows: T[]): T[] {
+// Exported for KanbanBoard.tsx (Session 9), which reuses the exact same
+// item.list query shape/pagination as GroupItemList and only differs in
+// how the loaded items are rendered (§6: "presentation and grouping only").
+export function sortByRank<T extends { rank: string }>(rows: T[]): T[] {
   return [...rows].sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
 }
 
@@ -585,6 +590,7 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
 
   const { columns } = boardQuery.data;
   const groups = sortByRank(boardQuery.data.groups);
+  const kanbanGroupByColumn = columns.find((c) => c.id === draftConfig.groupBy);
 
   function handleGroupDragEnd(event: DragEndEvent) {
     const { active, over } = event;
@@ -608,39 +614,81 @@ export function BoardTable({ boardId, workspaceId, viewId }: { boardId: string; 
         key={viewId ?? "default"}
         columns={columns}
         initialConfig={baseViewConfig}
-        onChange={setDraftConfig}
+        onChange={(delta) => setDraftConfig((prev) => ({ ...prev, ...delta }))}
       />
-      {mutationError && <p style={{ color: "crimson" }}>{mutationError}</p>}
-      <div role="table" style={{ width: "100%" }}>
-        <div role="row" style={{ ...rowStyle, gridTemplateColumns: gridTemplateColumns(columns.length) }}>
-          <div role="columnheader" style={headerCellStyle} />
-          <div role="columnheader" style={headerCellStyle}>#</div>
-          <div role="columnheader" style={headerCellStyle}>Name</div>
-          {columns.map((column) => (
-            <div key={column.id} role="columnheader" style={headerCellStyle}>
-              {column.name}
-            </div>
-          ))}
-        </div>
-        <DndContext sensors={groupSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
-          <SortableContext items={groups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
-            {groups.map((group) => (
-              <Fragment key={group.id}>
-                <GroupHeaderRow group={group} columnCount={columns.length} />
-                <GroupItemList
-                  boardId={boardId}
-                  group={group}
-                  columns={columns}
-                  viewConfig={draftConfig}
-                  editingCell={editingCell}
-                  setEditingCell={setEditingCell}
-                  setMutationError={setMutationError}
-                />
-              </Fragment>
-            ))}
-          </SortableContext>
-        </DndContext>
+      <div style={{ margin: "0.5rem 0" }}>
+        <label>
+          View:{" "}
+          <select
+            value={draftConfig.type}
+            onChange={(e) => setDraftConfig((prev) => ({ ...prev, type: e.target.value as ViewConfig["type"] }))}
+          >
+            <option value="table">Table</option>
+            <option value="kanban">Kanban</option>
+          </select>
+        </label>
+        {draftConfig.type === "kanban" && (
+          <label style={{ marginLeft: "1rem" }}>
+            Group by:{" "}
+            <select
+              value={draftConfig.groupBy ?? ""}
+              onChange={(e) => setDraftConfig((prev) => ({ ...prev, groupBy: e.target.value || null }))}
+            >
+              <option value="">— choose a column —</option>
+              {columns.filter((c) => isKanbanGroupable(c.key)).map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
+      {mutationError && <p style={{ color: "crimson" }}>{mutationError}</p>}
+      {draftConfig.type === "kanban" ? (
+        kanbanGroupByColumn ? (
+          <KanbanBoard
+            boardId={boardId}
+            groups={groups}
+            groupByColumn={kanbanGroupByColumn}
+            viewConfig={draftConfig}
+            setMutationError={setMutationError}
+          />
+        ) : (
+          <p>Choose a column to group by.</p>
+        )
+      ) : (
+        <div role="table" style={{ width: "100%" }}>
+          <div role="row" style={{ ...rowStyle, gridTemplateColumns: gridTemplateColumns(columns.length) }}>
+            <div role="columnheader" style={headerCellStyle} />
+            <div role="columnheader" style={headerCellStyle}>#</div>
+            <div role="columnheader" style={headerCellStyle}>Name</div>
+            {columns.map((column) => (
+              <div key={column.id} role="columnheader" style={headerCellStyle}>
+                {column.name}
+              </div>
+            ))}
+          </div>
+          <DndContext sensors={groupSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+            <SortableContext items={groups.map((g) => g.id)} strategy={verticalListSortingStrategy}>
+              {groups.map((group) => (
+                <Fragment key={group.id}>
+                  <GroupHeaderRow group={group} columnCount={columns.length} />
+                  <GroupItemList
+                    boardId={boardId}
+                    group={group}
+                    columns={columns}
+                    viewConfig={draftConfig}
+                    editingCell={editingCell}
+                    setEditingCell={setEditingCell}
+                    setMutationError={setMutationError}
+                  />
+                </Fragment>
+              ))}
+            </SortableContext>
+          </DndContext>
+        </div>
+      )}
     </div>
   );
 }

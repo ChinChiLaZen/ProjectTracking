@@ -1,23 +1,12 @@
-"use client";
-
 import { z } from "zod";
-import type { CellProps, ColumnType, EditorProps } from "./types";
+import type { ColumnType } from "./types";
+import { CheckboxCell, CheckboxEditor } from "./checkbox.client";
 
 const valueSchema = z.boolean();
 const settingsSchema = z.object({});
 
-type CheckboxValue = z.infer<typeof valueSchema>;
-type CheckboxSettings = z.infer<typeof settingsSchema>;
-
-function CheckboxCell({ value, readOnly }: CellProps<CheckboxValue, CheckboxSettings>) {
-  return <input type="checkbox" checked={value} readOnly disabled={readOnly} />;
-}
-
-// No draft/commit step — a checkbox toggles and commits in the same
-// interaction, unlike text/number's click-to-edit-then-confirm flow.
-function CheckboxEditor({ value, onChange }: EditorProps<CheckboxValue, CheckboxSettings>) {
-  return <input type="checkbox" autoFocus checked={value} onChange={(e) => onChange(e.target.checked)} />;
-}
+export type CheckboxValue = z.infer<typeof valueSchema>;
+export type CheckboxSettings = z.infer<typeof settingsSchema>;
 
 export const checkboxColumn: ColumnType<CheckboxValue, CheckboxSettings> = {
   key: "checkbox",

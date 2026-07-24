@@ -251,6 +251,17 @@ async function main() {
     creatorId: owner.id,
   });
 
+  // Session 9 fixture: a Kanban-mode view grouped by Status — proves the
+  // saved-view round trip for viewConfig.type/groupBy against real data.
+  await createView({
+    organizationId: org.id,
+    boardId: board.id,
+    name: "By status (Kanban)",
+    visibility: "SHARED",
+    config: { type: "kanban", groupBy: statusColumnDef.id },
+    creatorId: owner.id,
+  });
+
   const bigBoardStart = performance.now();
   await runWithTenant(org.id, () => seedBigBoard({ organizationId: org.id, workspaceId: workspace.id }));
   const bigBoardMs = Math.round(performance.now() - bigBoardStart);

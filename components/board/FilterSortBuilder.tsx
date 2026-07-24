@@ -5,7 +5,7 @@ import { columnTypeRegistry } from "@/lib/columnTypes/registry";
 import { getColumnType } from "@/lib/columnTypes/types";
 import { operatorSets } from "@/lib/columnTypes/operators";
 import { deriveViewConfig, type RawFilterRow, type RawSort } from "@/lib/views/deriveDraftConfig";
-import type { ViewConfig } from "@/lib/views/viewConfig";
+import type { FilterClause, SortClause, ViewConfig } from "@/lib/views/viewConfig";
 import type { ShadowField } from "@/lib/columnTypes/types";
 
 type BuilderColumn = { id: string; key: string; name: string };
@@ -43,7 +43,12 @@ export function FilterSortBuilder({
 }: {
   columns: BuilderColumn[];
   initialConfig: ViewConfig;
-  onChange: (config: ViewConfig) => void;
+  // Reports only the filters/sort delta, not a full ViewConfig — the caller
+  // (BoardTable) merges this into its own draftConfig. Session 9: this used
+  // to report the whole deriveViewConfig(...) result, which silently reset
+  // draftConfig.type/groupBy back to their schema defaults on every filter
+  // edit, clobbering a Kanban toggle the moment a user touched a filter.
+  onChange: (delta: { filters: FilterClause[]; sort: SortClause | null }) => void;
 }) {
   // crypto.randomUUID() rather than a ref-based counter — accessing a ref's
   // .current during render (including a useState lazy initializer, which
@@ -59,7 +64,8 @@ export function FilterSortBuilder({
   const [sort, setSort] = useState<RawSort>(initialConfig.sort);
 
   useEffect(() => {
-    onChange(deriveViewConfig(rawFilters, sort, columns, columnTypeRegistry));
+    const config = deriveViewConfig(rawFilters, sort, columns, columnTypeRegistry);
+    onChange({ filters: config.filters, sort: config.sort });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onChange is a stable setState setter
   }, [rawFilters, sort, columns]);
 

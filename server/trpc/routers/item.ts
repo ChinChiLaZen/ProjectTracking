@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { router, protectedProcedure } from "../trpc";
 import { requireBoardAccess } from "../../../lib/permissions/requireBoardAccess";
-import { createItem, deleteItem, listItemsInGroup, moveItem, renameItem } from "../../services/items";
+import { createItem, deleteItem, listItemsInGroup, moveItem, moveKanbanItem, renameItem } from "../../services/items";
 import { setColumnValue } from "../../services/columnValues";
 import { defaultViewConfig, viewConfigSchema } from "../../../lib/views/viewConfig";
 
@@ -71,6 +71,43 @@ export const itemRouter = router({
         expectedVersion: input.expectedVersion,
         actorId: ctx.userId,
       });
+    }),
+
+  // Session 9: Kanban drag — one rank update + one setColumnValue in a
+  // single transaction (§6/§7). Never changes the item's real board Group.
+  moveKanban: protectedProcedure
+    .input(
+      z.object({
+        boardId: z.string(),
+        itemId: z.string(),
+        rank: z.string().min(1),
+        expectedItemVersion: z.number().int().nonnegative(),
+        columnId: z.string(),
+        value: z.unknown(),
+        expectedColumnVersion: z.number().int().nonnegative(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      await requireBoardAccess(ctx, input.boardId, "GUEST"); // item.edit (§5)
+      const result = await moveKanbanItem({
+        organizationId: ctx.organizationId,
+        boardId: input.boardId,
+        itemId: input.itemId,
+        rank: input.rank,
+        expectedItemVersion: input.expectedItemVersion,
+        columnId: input.columnId,
+        value: input.value,
+        expectedColumnVersion: input.expectedColumnVersion,
+        actorId: ctx.userId,
+      });
+
+      // Trimmed to match BoardColumnValue — same "Json field through
+      // react-query generics" reasoning as setColumnValue's return above.
+      const value: unknown = result.columnValue.value;
+      return {
+        item: result.item,
+        columnValue: { itemId: result.columnValue.itemId, columnId: result.columnValue.columnId, value, version: result.columnValue.version },
+      };
     }),
 
   // Session 4: cursor-paginated, filtered/sorted item list for one group
